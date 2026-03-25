@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/tudorAbrudan/tracelog/internal/models"
@@ -149,6 +150,26 @@ func (s *Store) UpdateServerStatus(ctx context.Context, id, status string) error
 		status, time.Now().UTC().Format(time.RFC3339), id,
 	)
 	return err
+}
+
+func (s *Store) EnsureLocalServer(ctx context.Context) (*models.Server, error) {
+	var srv models.Server
+	var lastSeen, created string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, name, COALESCE(host, ''), api_key, status, COALESCE(last_seen_at, ''), created_at
+		 FROM servers WHERE host = 'localhost' LIMIT 1`,
+	).Scan(&srv.ID, &srv.Name, &srv.Host, &srv.APIKey, &srv.Status, &lastSeen, &created)
+	if err == nil {
+		srv.LastSeenAt, _ = time.Parse(time.RFC3339, lastSeen)
+		srv.CreatedAt, _ = time.Parse(time.RFC3339, created)
+		return &srv, nil
+	}
+
+	hostname, _ := os.Hostname()
+	if hostname == "" {
+		hostname = "this-server"
+	}
+	return s.CreateServer(ctx, hostname, "localhost")
 }
 
 func generateID() string {

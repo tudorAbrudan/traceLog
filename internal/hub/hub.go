@@ -18,6 +18,7 @@ type Hub struct {
 	server      *http.Server
 	mux         *http.ServeMux
 	rateLimiter *loginRateLimiter
+	ws          *wsHub
 }
 
 func New(cfg *models.Config) (*Hub, error) {
@@ -31,6 +32,7 @@ func New(cfg *models.Config) (*Hub, error) {
 		store:       s,
 		mux:         http.NewServeMux(),
 		rateLimiter: newLoginRateLimiter(),
+		ws:          newWSHub(),
 	}
 
 	h.registerRoutes()
@@ -43,6 +45,15 @@ func (h *Hub) Store() *store.Store {
 
 func (h *Hub) IngestMetrics(ctx context.Context, m *models.SystemMetrics) error {
 	return h.store.InsertMetrics(ctx, m)
+}
+
+func (h *Hub) EnsureLocalServer(ctx context.Context) (string, error) {
+	srv, err := h.store.EnsureLocalServer(ctx)
+	if err != nil {
+		return "", err
+	}
+	h.store.UpdateServerStatus(ctx, srv.ID, "online")
+	return srv.ID, nil
 }
 
 func (h *Hub) Run() error {
@@ -109,6 +120,16 @@ func (h *Hub) registerRoutes() {
 	h.mux.HandleFunc("GET /api/settings/log-sources", auth(h.handleGetLogSources))
 	h.mux.HandleFunc("POST /api/settings/log-sources", auth(csrf(h.handleCreateLogSource)))
 
-	// TODO: WebSocket endpoint for agents (authenticated via API key, not session)
-	// TODO: Serve embedded Svelte dashboard for all non-API routes
+	// Logs and Docker metrics
+	h.mux.HandleFunc("GET /api/logs", auth(h.handleGetLogs))
+	h.mux.HandleFunc("GET /api/servers/{id}/docker", auth(h.handleGetDockerMetrics))
+
+	// WebSocket for agent connections (authenticated via API key)
+	h.mux.HandleFunc("GET /api/ws/agent", h.handleAgentWS)
+
+	// Detection endpoint
+	h.mux.HandleFunc("GET /api/detect", auth(h.handleDetect))
+
+	// Serve embedded dashboard for all non-API routes
+	h.mux.HandleFunc("GET /", h.handleDashboard)
 }

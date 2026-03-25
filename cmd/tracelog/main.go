@@ -195,12 +195,152 @@ func cmdUser() {
 	}
 }
 
-func cmdStatus()    { fmt.Println("Status not yet implemented") }
-func cmdBackup()    { fmt.Println("Backup not yet implemented") }
-func cmdRestore()   { fmt.Println("Restore not yet implemented") }
-func cmdInstall()   { fmt.Println("Install wizard not yet implemented") }
-func cmdUninstall() { fmt.Println("Uninstall not yet implemented") }
-func cmdUpgrade()   { fmt.Println("Upgrade not yet implemented") }
+func cmdStatus() {
+	cfg := models.DefaultConfig()
+	dbPath := cfg.DataDir + "/tracelog.db"
+
+	fmt.Printf("TraceLog %s\n\n", version)
+
+	if info, err := os.Stat(dbPath); err == nil {
+		fmt.Printf("  Database: %s (%.1f MB)\n", dbPath, float64(info.Size())/(1024*1024))
+	} else {
+		fmt.Printf("  Database: %s (not found)\n", dbPath)
+	}
+
+	s, err := store.New(cfg.DataDir)
+	if err != nil {
+		fmt.Printf("  Database: cannot open (%v)\n", err)
+		return
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	userCount, _ := s.UserCount(ctx)
+	servers, _ := s.ListServers(ctx)
+
+	fmt.Printf("  Users:    %d\n", userCount)
+	fmt.Printf("  Servers:  %d\n", len(servers))
+	for _, srv := range servers {
+		fmt.Printf("    - %s (%s) [%s]\n", srv.Name, srv.Host, srv.Status)
+	}
+
+	retDays, _ := s.GetSetting(ctx, "retention_days")
+	fmt.Printf("  Retention: %s days\n", retDays)
+	fmt.Println()
+}
+
+func cmdBackup() {
+	cfg := models.DefaultConfig()
+	src := cfg.DataDir + "/tracelog.db"
+	dst := cfg.DataDir + "/backups/tracelog_" + fmt.Sprintf("%d", os.Getpid()) + ".db"
+
+	if _, err := os.Stat(src); os.IsNotExist(err) {
+		fatal("Database not found at %s", src)
+	}
+
+	if err := os.MkdirAll(cfg.DataDir+"/backups", 0750); err != nil {
+		fatal("Cannot create backup dir: %v", err)
+	}
+
+	srcFile, err := os.Open(src)
+	if err != nil {
+		fatal("Cannot open database: %v", err)
+	}
+	defer srcFile.Close()
+
+	dstFile, err := os.Create(dst)
+	if err != nil {
+		fatal("Cannot create backup: %v", err)
+	}
+	defer dstFile.Close()
+
+	buf := make([]byte, 1024*1024)
+	for {
+		n, err := srcFile.Read(buf)
+		if n > 0 {
+			dstFile.Write(buf[:n])
+		}
+		if err != nil {
+			break
+		}
+	}
+
+	fmt.Printf("Backup created: %s\n", dst)
+}
+
+func cmdRestore() {
+	if len(os.Args) < 3 {
+		fatal("Usage: tracelog restore <backup-file>")
+	}
+	backupPath := os.Args[2]
+	cfg := models.DefaultConfig()
+	dst := cfg.DataDir + "/tracelog.db"
+
+	if _, err := os.Stat(backupPath); os.IsNotExist(err) {
+		fatal("Backup file not found: %s", backupPath)
+	}
+
+	srcFile, err := os.Open(backupPath)
+	if err != nil {
+		fatal("Cannot open backup: %v", err)
+	}
+	defer srcFile.Close()
+
+	dstFile, err := os.Create(dst)
+	if err != nil {
+		fatal("Cannot write database: %v", err)
+	}
+	defer dstFile.Close()
+
+	buf := make([]byte, 1024*1024)
+	for {
+		n, err := srcFile.Read(buf)
+		if n > 0 {
+			dstFile.Write(buf[:n])
+		}
+		if err != nil {
+			break
+		}
+	}
+
+	fmt.Printf("Database restored from %s\n", backupPath)
+}
+
+func cmdInstall() {
+	fmt.Printf("TraceLog %s - Interactive Installer\n\n", version)
+	fmt.Println("For automated installation, use the install script:")
+	fmt.Println("  curl -sSL https://raw.githubusercontent.com/tudorAbrudan/tracelog/main/scripts/install.sh | bash")
+	fmt.Println()
+	fmt.Println("Or start the hub directly:")
+	fmt.Println("  tracelog serve")
+	fmt.Println("  Then open the browser to complete setup.")
+}
+
+func cmdUninstall() {
+	fmt.Println("To uninstall TraceLog:")
+	fmt.Println()
+	fmt.Println("  1. Stop the service:")
+	fmt.Println("     sudo systemctl stop tracelog")
+	fmt.Println("     sudo systemctl disable tracelog")
+	fmt.Println()
+	fmt.Println("  2. Remove files:")
+	fmt.Println("     sudo rm /etc/systemd/system/tracelog.service")
+	fmt.Println("     sudo rm /usr/local/bin/tracelog")
+	fmt.Println("     sudo rm -rf /var/lib/tracelog")
+	fmt.Println("     sudo rm -rf /etc/tracelog")
+	fmt.Println()
+	fmt.Println("  3. Remove user (optional):")
+	fmt.Println("     sudo userdel tracelog")
+}
+
+func cmdUpgrade() {
+	fmt.Printf("Current version: %s\n", version)
+	fmt.Println("To upgrade, download the latest release:")
+	fmt.Println("  curl -sSL https://raw.githubusercontent.com/tudorAbrudan/tracelog/main/scripts/install.sh | bash")
+	fmt.Println()
+	fmt.Println("Or build from source:")
+	fmt.Println("  git pull && make build")
+}
 
 func fatal(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "Error: "+format+"\n", args...)

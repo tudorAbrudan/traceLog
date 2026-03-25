@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/tudorAbrudan/tracelog/internal/agent/collector"
+	"github.com/tudorAbrudan/tracelog/internal/agent/transport"
 	"github.com/tudorAbrudan/tracelog/internal/hub"
 	"github.com/tudorAbrudan/tracelog/internal/models"
 )
@@ -30,26 +31,47 @@ type Option func(*Agent)
 func WithLocalHub(h *hub.Hub) Option {
 	return func(a *Agent) {
 		a.transport = &localTransport{hub: h}
-		a.serverID = "local"
+		serverID, err := h.EnsureLocalServer(context.Background())
+		if err != nil {
+			slog.Error("Failed to ensure local server", "error", err)
+			a.serverID = "local"
+		} else {
+			a.serverID = serverID
+		}
 	}
 }
 
 func WithRemoteHub(hubURL, apiKey string) Option {
 	return func(a *Agent) {
-		// TODO: implement WebSocket transport
+		wt := transport.NewWSTransport(hubURL, apiKey)
+		a.transport = &wsTransportAdapter{wt: wt}
 		a.hubURL = hubURL
 		a.apiKey = apiKey
 		a.serverID = "remote"
+		a.wsTransport = wt
 	}
 }
 
+type wsTransportAdapter struct {
+	wt *transport.WSTransport
+}
+
+func (w *wsTransportAdapter) SendMetrics(ctx context.Context, m *models.SystemMetrics) error {
+	return w.wt.SendMetrics(ctx, m)
+}
+
+func (w *wsTransportAdapter) Close() error {
+	return w.wt.Close()
+}
+
 type Agent struct {
-	cfg       *models.Config
-	transport Transport
-	system    *collector.SystemCollector
-	serverID  string
-	hubURL    string
-	apiKey    string
+	cfg         *models.Config
+	transport   Transport
+	system      *collector.SystemCollector
+	wsTransport *transport.WSTransport
+	serverID    string
+	hubURL      string
+	apiKey      string
 }
 
 func New(cfg *models.Config, opts ...Option) (*Agent, error) {
@@ -84,6 +106,10 @@ func (a *Agent) Start(ctx context.Context) error {
 	defer ticker.Stop()
 
 	slog.Info("Agent started", "interval", interval, "system", a.cfg.Collect.System, "docker", a.cfg.Collect.Docker)
+
+	if a.wsTransport != nil {
+		go a.wsTransport.ConnectWithRetry(ctx)
+	}
 
 	a.collectAndSend(ctx)
 

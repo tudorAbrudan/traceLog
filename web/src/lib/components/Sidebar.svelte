@@ -1,0 +1,131 @@
+<script lang="ts">
+  import { currentPage, user } from '../store';
+  import { api } from '../api';
+
+  const navItems = [
+    { id: 'overview', label: 'Overview', icon: '◉' },
+    { id: 'logs', label: 'Logs', icon: '☰' },
+    { id: 'uptime', label: 'Uptime', icon: '↑' },
+    { id: 'settings', label: 'Settings', icon: '⚙' },
+  ];
+
+  async function handleLogout() {
+    try {
+      await api.logout();
+    } catch {}
+    window.location.reload();
+  }
+</script>
+
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <h1>TraceLog</h1>
+  </div>
+
+  <nav>
+    {#each navItems as item}
+      <button
+        class:active={$currentPage === item.id}
+        on:click={() => currentPage.set(item.id)}
+      >
+        <span class="icon">{item.icon}</span>
+        <span>{item.label}</span>
+      </button>
+    {/each}
+  </nav>
+
+  <div class="sidebar-footer">
+    <div class="user-info">
+      <span class="user-avatar">{$user?.username?.charAt(0).toUpperCase()}</span>
+      <span class="username">{$user?.username}</span>
+    </div>
+    <button class="logout" on:click={handleLogout}>Sign out</button>
+  </div>
+</aside>
+
+<style>
+  .sidebar {
+    width: 220px;
+    height: 100vh;
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    left: 0;
+    top: 0;
+  }
+  .sidebar-header {
+    padding: 1.25rem 1rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar-header h1 {
+    font-size: 1.2rem;
+    margin: 0;
+    background: linear-gradient(135deg, #58a6ff, #bc8cff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  nav {
+    flex: 1;
+    padding: 0.75rem 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  nav button {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.55rem 0.75rem;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    text-align: left;
+    transition: background 0.1s;
+  }
+  nav button:hover { background: var(--bg-hover); }
+  nav button.active {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    font-weight: 600;
+  }
+  .icon { font-size: 1rem; width: 20px; text-align: center; }
+  .sidebar-footer {
+    padding: 0.75rem;
+    border-top: 1px solid var(--border);
+  }
+  .user-info {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.25rem 0.25rem 0.5rem;
+  }
+  .user-avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: #58a6ff33;
+    color: #58a6ff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 700;
+  }
+  .username { font-size: 0.8rem; color: var(--text-primary); }
+  .logout {
+    width: 100%;
+    padding: 0.4rem;
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.75rem;
+  }
+  .logout:hover { background: var(--bg-hover); color: #f85149; border-color: #f8514944; }
+</style>

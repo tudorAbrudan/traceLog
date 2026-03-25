@@ -3,7 +3,9 @@ module github.com/tudorAbrudan/tracelog
 go 1.26.1
 
 require (
+	github.com/coder/websocket v1.8.14
 	github.com/shirou/gopsutil/v4 v4.26.2
+	github.com/wneessen/go-mail v0.7.2
 	golang.org/x/crypto v0.49.0
 	modernc.org/sqlite v1.47.0
 )
@@ -22,6 +24,7 @@ require (
 	github.com/tklauser/numcpus v0.11.0 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	golang.org/x/sys v0.42.0 // indirect
+	golang.org/x/text v0.35.0 // indirect
 	modernc.org/libc v1.70.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect

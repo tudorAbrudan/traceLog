@@ -1,0 +1,50 @@
+version: 2
+project_name: tracelog
+
+before:
+  hooks:
+    - cmd: make web-build
+      env:
+        - CGO_ENABLED=0
+
+builds:
+  - id: tracelog
+    main: ./cmd/tracelog
+    binary: tracelog
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: tracelog
+    format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"
+
+release:
+  github:
+    owner: tudorAbrudan
+    name: tracelog
+  draft: false
+  prerelease: auto
