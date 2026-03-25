@@ -112,6 +112,9 @@ func (h *Hub) processAgentMessage(ctx context.Context, serverID string, msg *wsM
 		}
 		for i := range metrics {
 			metrics[i].ServerID = serverID
+			if err := h.store.InsertDockerMetrics(ctx, &metrics[i]); err != nil {
+				slog.Error("Failed to store docker metrics", "error", err)
+			}
 		}
 
 	case "log":
@@ -121,6 +124,9 @@ func (h *Hub) processAgentMessage(ctx context.Context, serverID string, msg *wsM
 			return
 		}
 		entry.ServerID = serverID
+		if err := h.store.InsertLog(ctx, &entry); err != nil {
+			slog.Error("Failed to store log entry", "error", err)
+		}
 
 	default:
 		slog.Warn("Unknown message type from agent", "type", msg.Type)

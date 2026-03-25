@@ -13,6 +13,8 @@ import (
 
 type Transport interface {
 	SendMetrics(ctx context.Context, m *models.SystemMetrics) error
+	SendDockerMetrics(ctx context.Context, metrics []models.DockerMetrics) error
+	SendLog(ctx context.Context, entry *models.LogEntry) error
 	Close() error
 }
 
@@ -22,6 +24,14 @@ type localTransport struct {
 
 func (t *localTransport) SendMetrics(ctx context.Context, m *models.SystemMetrics) error {
 	return t.hub.IngestMetrics(ctx, m)
+}
+
+func (t *localTransport) SendDockerMetrics(ctx context.Context, metrics []models.DockerMetrics) error {
+	return t.hub.IngestDockerMetrics(ctx, metrics)
+}
+
+func (t *localTransport) SendLog(ctx context.Context, entry *models.LogEntry) error {
+	return t.hub.IngestLog(ctx, entry)
 }
 
 func (t *localTransport) Close() error { return nil }
@@ -60,6 +70,14 @@ func (w *wsTransportAdapter) SendMetrics(ctx context.Context, m *models.SystemMe
 	return w.wt.SendMetrics(ctx, m)
 }
 
+func (w *wsTransportAdapter) SendDockerMetrics(ctx context.Context, metrics []models.DockerMetrics) error {
+	return w.wt.SendDockerMetrics(ctx, metrics)
+}
+
+func (w *wsTransportAdapter) SendLog(ctx context.Context, entry *models.LogEntry) error {
+	return w.wt.SendLog(ctx, entry)
+}
+
 func (w *wsTransportAdapter) Close() error {
 	return w.wt.Close()
 }
@@ -68,6 +86,8 @@ type Agent struct {
 	cfg         *models.Config
 	transport   Transport
 	system      *collector.SystemCollector
+	docker      *collector.DockerCollector
+	logs        *collector.LogCollector
 	wsTransport *transport.WSTransport
 	serverID    string
 	hubURL      string
@@ -85,6 +105,10 @@ func New(cfg *models.Config, opts ...Option) (*Agent, error) {
 
 	if cfg.Collect.System {
 		a.system = collector.NewSystemCollector()
+	}
+
+	if cfg.Collect.Docker {
+		a.docker = collector.NewDockerCollector()
 	}
 
 	return a, nil
@@ -111,6 +135,18 @@ func (a *Agent) Start(ctx context.Context) error {
 		go a.wsTransport.ConnectWithRetry(ctx)
 	}
 
+	// Start log collectors
+	if len(a.cfg.Collect.LogSources) > 0 && a.transport != nil {
+		a.logs = collector.NewLogCollector(a.cfg.Collect.LogSources, func(entry *models.LogEntry) {
+			entry.ServerID = a.serverID
+			if err := a.transport.SendLog(ctx, entry); err != nil {
+				slog.Debug("Failed to send log entry", "error", err)
+			}
+		})
+		a.logs.Start(ctx)
+		slog.Info("Log collectors started", "sources", len(a.cfg.Collect.LogSources))
+	}
+
 	a.collectAndSend(ctx)
 
 	for {
@@ -124,15 +160,33 @@ func (a *Agent) Start(ctx context.Context) error {
 }
 
 func (a *Agent) collectAndSend(ctx context.Context) {
-	if a.system != nil && a.transport != nil {
+	if a.transport == nil {
+		return
+	}
+
+	if a.system != nil {
 		metrics, err := a.system.Collect(ctx)
 		if err != nil {
 			slog.Error("Failed to collect system metrics", "error", err)
-			return
+		} else {
+			metrics.ServerID = a.serverID
+			if err := a.transport.SendMetrics(ctx, metrics); err != nil {
+				slog.Error("Failed to send system metrics", "error", err)
+			}
 		}
-		metrics.ServerID = a.serverID
-		if err := a.transport.SendMetrics(ctx, metrics); err != nil {
-			slog.Error("Failed to send metrics", "error", err)
+	}
+
+	if a.docker != nil {
+		metrics, err := a.docker.Collect(ctx)
+		if err != nil {
+			slog.Debug("Failed to collect docker metrics", "error", err)
+		} else if len(metrics) > 0 {
+			for i := range metrics {
+				metrics[i].ServerID = a.serverID
+			}
+			if err := a.transport.SendDockerMetrics(ctx, metrics); err != nil {
+				slog.Error("Failed to send docker metrics", "error", err)
+			}
 		}
 	}
 }

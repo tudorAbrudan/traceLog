@@ -144,6 +144,18 @@ func (s *Store) GetServerByAPIKey(ctx context.Context, apiKey string) (*models.S
 	return &srv, nil
 }
 
+func (s *Store) DeleteServer(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM servers WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	s.db.ExecContext(ctx, `DELETE FROM metrics WHERE server_id = ?`, id)
+	s.db.ExecContext(ctx, `DELETE FROM docker_metrics WHERE server_id = ?`, id)
+	s.db.ExecContext(ctx, `DELETE FROM logs WHERE server_id = ?`, id)
+	s.db.ExecContext(ctx, `DELETE FROM access_logs WHERE server_id = ?`, id)
+	return nil
+}
+
 func (s *Store) UpdateServerStatus(ctx context.Context, id, status string) error {
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE servers SET status = ?, last_seen_at = ? WHERE id = ?`,

@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"time"
 
 	"github.com/tudorAbrudan/tracelog/internal/hub/uptime"
@@ -39,4 +41,59 @@ func (s *Store) GetUptimeResults(ctx context.Context, checkID string, since time
 		results = append(results, r)
 	}
 	return results, nil
+}
+
+func (s *Store) ListUptimeChecks(ctx context.Context) ([]uptime.Check, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, name, url, interval_seconds, timeout_seconds, enabled
+		 FROM uptime_checks ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var checks []uptime.Check
+	for rows.Next() {
+		var c uptime.Check
+		var enabled int
+		if err := rows.Scan(&c.ID, &c.Name, &c.URL, &c.Interval, &c.Timeout, &enabled); err != nil {
+			return nil, err
+		}
+		c.Enabled = enabled == 1
+		checks = append(checks, c)
+	}
+	return checks, nil
+}
+
+func (s *Store) CreateUptimeCheck(ctx context.Context, c *uptime.Check) error {
+	if c.ID == "" {
+		b := make([]byte, 8)
+		rand.Read(b)
+		c.ID = hex.EncodeToString(b)
+	}
+	if c.Interval == 0 {
+		c.Interval = 60
+	}
+	if c.Timeout == 0 {
+		c.Timeout = 10
+	}
+	enabled := 0
+	if c.Enabled {
+		enabled = 1
+	}
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO uptime_checks (id, name, url, interval_seconds, timeout_seconds, enabled)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		c.ID, c.Name, c.URL, c.Interval, c.Timeout, enabled,
+	)
+	return err
+}
+
+func (s *Store) DeleteUptimeCheck(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM uptime_checks WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `DELETE FROM uptime_results WHERE check_id = ?`, id)
+	return err
 }

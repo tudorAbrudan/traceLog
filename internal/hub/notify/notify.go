@@ -48,6 +48,10 @@ func (m *Manager) AddChannel(ch *Channel) {
 	m.channels[ch.ID] = ch
 }
 
+func (m *Manager) RemoveChannel(id string) {
+	delete(m.channels, id)
+}
+
 func (m *Manager) Send(ctx context.Context, channelID string, subject, body string) error {
 	ch, ok := m.channels[channelID]
 	if !ok {
