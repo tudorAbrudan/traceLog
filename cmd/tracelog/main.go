@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
 	"github.com/tudorAbrudan/tracelog/internal/agent"
 	"github.com/tudorAbrudan/tracelog/internal/hub"
+	"github.com/tudorAbrudan/tracelog/internal/hub/store"
 	"github.com/tudorAbrudan/tracelog/internal/models"
 )
 
@@ -134,8 +136,63 @@ func cmdUser() {
 		fmt.Println("Usage: tracelog user <create|reset-password|list> [username]")
 		os.Exit(1)
 	}
-	// TODO: implement user management
-	fmt.Println("User management not yet implemented")
+
+	cfg := models.DefaultConfig()
+
+	s, err := store.New(cfg.DataDir)
+	if err != nil {
+		fatal("Failed to open database: %v", err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+
+	switch os.Args[2] {
+	case "create":
+		username := "admin"
+		if len(os.Args) > 3 {
+			username = os.Args[3]
+		}
+		password := store.GeneratePassword()
+		user, err := s.CreateUser(ctx, username, password)
+		if err != nil {
+			fatal("Failed to create user: %v", err)
+		}
+		fmt.Printf("User created successfully:\n")
+		fmt.Printf("  Username: %s\n", user.Username)
+		fmt.Printf("  Password: %s\n", password)
+		fmt.Printf("\n  Save this password - it is shown only once!\n")
+
+	case "reset-password":
+		if len(os.Args) < 4 {
+			fatal("Usage: tracelog user reset-password <username>")
+		}
+		username := os.Args[3]
+		password := store.GeneratePassword()
+		if err := s.UpdatePassword(ctx, username, password); err != nil {
+			fatal("Failed to reset password: %v", err)
+		}
+		fmt.Printf("Password reset for user %q:\n", username)
+		fmt.Printf("  New password: %s\n", password)
+		fmt.Printf("\n  Save this password - it is shown only once!\n")
+
+	case "list":
+		users, err := s.ListUsers(ctx)
+		if err != nil {
+			fatal("Failed to list users: %v", err)
+		}
+		if len(users) == 0 {
+			fmt.Println("No users found. Create one with: tracelog user create <username>")
+			return
+		}
+		fmt.Printf("%-20s %-20s\n", "USERNAME", "CREATED")
+		for _, u := range users {
+			fmt.Printf("%-20s %-20s\n", u.Username, u.CreatedAt.Format("2006-01-02 15:04"))
+		}
+
+	default:
+		fatal("Unknown user command: %s\nUsage: tracelog user <create|reset-password|list>", os.Args[2])
+	}
 }
 
 func cmdStatus()    { fmt.Println("Status not yet implemented") }

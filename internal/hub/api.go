@@ -78,12 +78,6 @@ func (h *Hub) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, server)
 }
 
-// Auth handlers (stubs)
-
-func (h *Hub) handleLogin(w http.ResponseWriter, r *http.Request)  { writeJSON(w, http.StatusOK, map[string]string{"status": "TODO"}) }
-func (h *Hub) handleLogout(w http.ResponseWriter, r *http.Request) { writeJSON(w, http.StatusOK, map[string]string{"status": "TODO"}) }
-func (h *Hub) handleMe(w http.ResponseWriter, r *http.Request)     { writeJSON(w, http.StatusOK, map[string]string{"status": "TODO"}) }
-
 // Settings handlers (stubs)
 
 func (h *Hub) handleGetSettings(w http.ResponseWriter, r *http.Request)    { writeJSON(w, http.StatusOK, map[string]string{"status": "TODO"}) }

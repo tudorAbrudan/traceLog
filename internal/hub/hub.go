@@ -13,10 +13,11 @@ import (
 )
 
 type Hub struct {
-	cfg    *models.Config
-	store  *store.Store
-	server *http.Server
-	mux    *http.ServeMux
+	cfg         *models.Config
+	store       *store.Store
+	server      *http.Server
+	mux         *http.ServeMux
+	rateLimiter *loginRateLimiter
 }
 
 func New(cfg *models.Config) (*Hub, error) {
@@ -26,9 +27,10 @@ func New(cfg *models.Config) (*Hub, error) {
 	}
 
 	h := &Hub{
-		cfg:   cfg,
-		store: s,
-		mux:   http.NewServeMux(),
+		cfg:         cfg,
+		store:       s,
+		mux:         http.NewServeMux(),
+		rateLimiter: newLoginRateLimiter(),
 	}
 
 	h.registerRoutes()
@@ -86,21 +88,27 @@ func (h *Hub) Shutdown() {
 }
 
 func (h *Hub) registerRoutes() {
+	auth := h.authMiddleware
+	csrf := h.csrfMiddleware
+
+	// Public routes
 	h.mux.HandleFunc("GET /api/health", h.handleHealth)
-	h.mux.HandleFunc("GET /api/servers", h.handleListServers)
-	h.mux.HandleFunc("GET /api/servers/{id}", h.handleGetServer)
-	h.mux.HandleFunc("GET /api/servers/{id}/metrics", h.handleGetMetrics)
-	h.mux.HandleFunc("POST /api/servers", h.handleCreateServer)
-
 	h.mux.HandleFunc("POST /api/auth/login", h.handleLogin)
-	h.mux.HandleFunc("POST /api/auth/logout", h.handleLogout)
-	h.mux.HandleFunc("GET /api/auth/me", h.handleMe)
 
-	h.mux.HandleFunc("GET /api/settings", h.handleGetSettings)
-	h.mux.HandleFunc("PUT /api/settings", h.handleUpdateSettings)
-	h.mux.HandleFunc("GET /api/settings/log-sources", h.handleGetLogSources)
-	h.mux.HandleFunc("POST /api/settings/log-sources", h.handleCreateLogSource)
+	// Protected routes (require session)
+	h.mux.HandleFunc("POST /api/auth/logout", auth(h.handleLogout))
+	h.mux.HandleFunc("GET /api/auth/me", auth(h.handleMe))
 
-	// TODO: WebSocket endpoint for agents and dashboard
+	h.mux.HandleFunc("GET /api/servers", auth(h.handleListServers))
+	h.mux.HandleFunc("GET /api/servers/{id}", auth(h.handleGetServer))
+	h.mux.HandleFunc("GET /api/servers/{id}/metrics", auth(h.handleGetMetrics))
+	h.mux.HandleFunc("POST /api/servers", auth(csrf(h.handleCreateServer)))
+
+	h.mux.HandleFunc("GET /api/settings", auth(h.handleGetSettings))
+	h.mux.HandleFunc("PUT /api/settings", auth(csrf(h.handleUpdateSettings)))
+	h.mux.HandleFunc("GET /api/settings/log-sources", auth(h.handleGetLogSources))
+	h.mux.HandleFunc("POST /api/settings/log-sources", auth(csrf(h.handleCreateLogSource)))
+
+	// TODO: WebSocket endpoint for agents (authenticated via API key, not session)
 	// TODO: Serve embedded Svelte dashboard for all non-API routes
 }
