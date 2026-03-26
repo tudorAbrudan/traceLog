@@ -1,98 +1,199 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import uPlot from 'uplot';
-  import 'uplot/dist/uPlot.min.css';
 
-  export let data: any[] = [];
-  export let field: string;
-  export let field2: string = '';
-  export let total: string = '';
-  export let unit: string = '';
-  export let color: string = '#58a6ff';
-  export let color2: string = '#f85149';
+  let {
+    data = [],
+    field,
+    field2 = '',
+    total = '',
+    unit = '',
+    color = '#58a6ff',
+    color2 = '#f85149',
+    label = '',
+    label2 = '',
+    height = 180,
+  }: {
+    data: any[];
+    field: string;
+    field2?: string;
+    total?: string;
+    unit?: string;
+    color?: string;
+    color2?: string;
+    label?: string;
+    label2?: string;
+    height?: number;
+  } = $props();
 
-  let el: HTMLDivElement;
+  let el: HTMLDivElement | undefined = $state();
   let chart: uPlot | null = null;
+  let pendingBuild: ReturnType<typeof setTimeout> | null = null;
 
-  function formatValue(v: number): string {
+  function fmtVal(v: number | null | undefined): string {
+    if (v == null) return '--';
     if (unit === 'bytes' || unit === 'bytes/s') {
-      if (v > 1073741824) return (v / 1073741824).toFixed(1) + ' GB';
-      if (v > 1048576) return (v / 1048576).toFixed(1) + ' MB';
-      if (v > 1024) return (v / 1024).toFixed(1) + ' KB';
+      const abs = Math.abs(v);
+      if (abs >= 1073741824) return (v / 1073741824).toFixed(1) + ' GB';
+      if (abs >= 1048576) return (v / 1048576).toFixed(1) + ' MB';
+      if (abs >= 1024) return (v / 1024).toFixed(1) + ' KB';
       return v.toFixed(0) + ' B';
     }
     if (unit === '%') return v.toFixed(1) + '%';
     return v.toFixed(2);
   }
 
-  function buildChart() {
+  function fmtAxis(_: uPlot, vals: number[]): string[] {
+    return vals.map(v => {
+      if (v == null) return '';
+      if (unit === '%') return v.toFixed(0) + '%';
+      if (unit === 'bytes' || unit === 'bytes/s') {
+        const abs = Math.abs(v);
+        if (abs >= 1073741824) return (v / 1073741824).toFixed(0) + 'G';
+        if (abs >= 1048576) return (v / 1048576).toFixed(0) + 'M';
+        if (abs >= 1024) return (v / 1024).toFixed(0) + 'K';
+        return v.toFixed(0);
+      }
+      return v % 1 === 0 ? v.toFixed(0) : v.toFixed(1);
+    });
+  }
+
+  function hexToRGBA(hex: string, alpha: number): string {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+
+  function tryBuild(retries = 5) {
     if (!el || data.length === 0) return;
+
+    const w = el.clientWidth;
+    if (w < 50) {
+      if (retries > 0) {
+        pendingBuild = setTimeout(() => tryBuild(retries - 1), 100);
+      }
+      return;
+    }
+
     if (chart) { chart.destroy(); chart = null; }
+    el.innerHTML = '';
 
-    const timestamps = data.map((d: any) => new Date(d.ts).getTime() / 1000);
-
-    let series: uPlot.Series[] = [{}];
-    let plotData: uPlot.AlignedData;
+    const timestamps = data.map((d: any) => Math.floor(new Date(d.ts).getTime() / 1000));
 
     const values1 = data.map((d: any) => {
-      if (total) return (d[field] / d[total]) * 100;
-      return d[field] ?? 0;
+      if (total && d[total] > 0) return (d[field] / d[total]) * 100;
+      return d[field] ?? null;
     });
 
+    let seriesDef: uPlot.Series[] = [
+      { label: 'Time' },
+      {
+        label: label || field,
+        stroke: color,
+        width: 1.5,
+        fill: hexToRGBA(color, 0.12),
+        value: (_: uPlot, v: number | null) => fmtVal(v),
+        points: { show: false },
+      },
+    ];
+
+    let plotData: uPlot.AlignedData = [timestamps, values1];
+
     if (field2) {
-      const values2 = data.map((d: any) => d[field2] ?? 0);
-      series.push(
-        { label: field, stroke: color, width: 2, fill: color + '15' },
-        { label: field2, stroke: color2, width: 2, fill: color2 + '15' }
-      );
+      const values2 = data.map((d: any) => d[field2] ?? null);
+      seriesDef.push({
+        label: label2 || field2,
+        stroke: color2,
+        width: 1.5,
+        fill: hexToRGBA(color2, 0.08),
+        value: (_: uPlot, v: number | null) => fmtVal(v),
+        points: { show: false },
+      });
       plotData = [timestamps, values1, values2];
-    } else {
-      series.push(
-        { label: field, stroke: color, width: 2, fill: color + '15' }
-      );
-      plotData = [timestamps, values1];
     }
 
     const opts: uPlot.Options = {
-      width: el.clientWidth,
-      height: 200,
-      series,
+      width: w,
+      height,
+      padding: [8, 8, 0, 0],
+      series: seriesDef,
       axes: [
-        { stroke: '#8b949e44', grid: { stroke: '#8b949e11' } },
         {
-          stroke: '#8b949e44',
-          grid: { stroke: '#8b949e11' },
-          values: (_: any, vals: number[]) => vals.map(v => formatValue(v)),
+          stroke: '#8b949e88',
+          ticks: { stroke: '#8b949e22', width: 1 },
+          grid: { stroke: '#8b949e11', width: 1 },
+          font: '10px system-ui, sans-serif',
+          gap: 4,
+          size: 36,
+        },
+        {
+          stroke: '#8b949e88',
+          ticks: { stroke: '#8b949e22', width: 1 },
+          grid: { stroke: '#8b949e15', width: 1 },
+          font: '10px system-ui, sans-serif',
+          values: fmtAxis,
+          gap: 4,
+          size: 50,
         },
       ],
-      cursor: { show: true },
       scales: {
-        y: total ? { min: 0, max: 100 } : {},
+        x: { time: true },
+        y: (total || unit === '%') ? { min: 0, max: 100 } : { auto: true },
+      },
+      legend: { show: false },
+      cursor: {
+        show: true,
+        points: { show: false },
       },
     };
 
     chart = new uPlot(opts, plotData, el);
   }
 
-  $: if (data.length > 0 && el) buildChart();
+  function scheduleBuild() {
+    if (pendingBuild) clearTimeout(pendingBuild);
+    pendingBuild = setTimeout(() => {
+      pendingBuild = null;
+      tryBuild(5);
+    }, 50);
+  }
 
-  onMount(() => {
-    const observer = new ResizeObserver(() => {
-      if (chart && el) chart.setSize({ width: el.clientWidth, height: 200 });
-    });
-    if (el) observer.observe(el);
-    return () => observer.disconnect();
+  $effect(() => {
+    if (el && data && data.length > 0) {
+      scheduleBuild();
+    }
   });
 
-  onDestroy(() => { if (chart) chart.destroy(); });
+  let resizeObserver: ResizeObserver | null = null;
+
+  onMount(() => {
+    resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const w = Math.floor(entry.contentRect.width);
+        if (w < 50) continue;
+        if (chart) {
+          chart.setSize({ width: w, height });
+        } else if (data.length > 0) {
+          tryBuild(3);
+        }
+      }
+    });
+    if (el) resizeObserver.observe(el);
+  });
+
+  onDestroy(() => {
+    if (pendingBuild) clearTimeout(pendingBuild);
+    resizeObserver?.disconnect();
+    if (chart) { chart.destroy(); chart = null; }
+  });
 </script>
 
-<div class="chart-container" bind:this={el}></div>
+<div class="chart-wrap" bind:this={el}></div>
 
 <style>
-  .chart-container {
+  .chart-wrap {
     width: 100%;
-    min-height: 200px;
+    min-height: 180px;
   }
-  :global(.u-wrap) { width: 100% !important; }
 </style>
