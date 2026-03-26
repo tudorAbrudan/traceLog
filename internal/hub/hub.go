@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/tudorAbrudan/tracelog/internal/hub/alerts"
@@ -25,6 +26,9 @@ type Hub struct {
 	alerts      *alerts.Engine
 	uptime      *uptime.Checker
 	notify      *notify.Manager
+
+	ingestSystem, ingestDocker, ingestLog, ingestAccess, ingestProcess atomic.Uint64
+	httpAPI, httpDashboard, httpHealth, httpMetrics, httpWS, httpOther  atomic.Uint64
 }
 
 func New(cfg *models.Config) (*Hub, error) {
@@ -68,6 +72,7 @@ func (h *Hub) IngestMetrics(ctx context.Context, m *models.SystemMetrics) error 
 	if err := h.store.InsertMetrics(ctx, m); err != nil {
 		return err
 	}
+	h.ingestSystem.Add(1)
 	if h.alerts != nil {
 		h.alerts.Evaluate(ctx, m.ServerID, m)
 	}
@@ -80,19 +85,32 @@ func (h *Hub) IngestDockerMetrics(ctx context.Context, metrics []models.DockerMe
 			return err
 		}
 	}
+	h.ingestDocker.Add(uint64(len(metrics)))
 	return nil
 }
 
 func (h *Hub) IngestProcessMetrics(ctx context.Context, metrics []models.ProcessMetrics) error {
-	return h.store.InsertProcessMetrics(ctx, metrics)
+	if err := h.store.InsertProcessMetrics(ctx, metrics); err != nil {
+		return err
+	}
+	h.ingestProcess.Add(uint64(len(metrics)))
+	return nil
 }
 
 func (h *Hub) IngestAccessLog(ctx context.Context, entry *models.AccessLogEntry) error {
-	return h.store.InsertAccessLog(ctx, entry)
+	if err := h.store.InsertAccessLog(ctx, entry); err != nil {
+		return err
+	}
+	h.ingestAccess.Add(1)
+	return nil
 }
 
 func (h *Hub) IngestLog(ctx context.Context, entry *models.LogEntry) error {
-	return h.store.InsertLog(ctx, entry)
+	if err := h.store.InsertLog(ctx, entry); err != nil {
+		return err
+	}
+	h.ingestLog.Add(1)
+	return nil
 }
 
 func (h *Hub) EnsureLocalServer(ctx context.Context) (string, error) {
@@ -115,7 +133,7 @@ func (h *Hub) Start(ctx context.Context) error {
 
 	h.server = &http.Server{
 		Addr:         addr,
-		Handler:      h.mux,
+		Handler:      h.httpMetricsMiddleware(h.mux),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  120 * time.Second,
@@ -208,6 +226,7 @@ func (h *Hub) registerRoutes() {
 	csrf := h.csrfMiddleware
 
 	// Public routes
+	h.mux.HandleFunc("GET /metrics", h.handlePrometheusMetrics)
 	h.mux.HandleFunc("GET /api/health", h.handleHealth)
 	h.mux.HandleFunc("POST /api/auth/login", h.handleLogin)
 	h.mux.HandleFunc("POST /api/auth/setup", h.handleSetup)

@@ -13,6 +13,8 @@ type Config struct {
 	HubURL      string `yaml:"hub_url"`
 	APIKey      string `yaml:"api_key"`
 	Version     string `yaml:"-"`
+	// MetricsToken, if set, protects GET /metrics (Bearer token or ?token=). Also TRACELOG_METRICS_TOKEN.
+	MetricsToken string `yaml:"metrics_token,omitempty"`
 
 	Collect CollectConfig `yaml:"collect"`
 }

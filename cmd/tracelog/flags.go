@@ -13,6 +13,7 @@ func parseServeFlags(cfg *models.Config) {
 	fs.IntVar(&cfg.Port, "port", cfg.Port, "Port to listen on")
 	fs.StringVar(&cfg.BindAddress, "bind", cfg.BindAddress, "Bind address")
 	fs.StringVar(&cfg.DataDir, "data", cfg.DataDir, "Data directory")
+	fs.StringVar(&cfg.MetricsToken, "metrics-token", cfg.MetricsToken, "If set, require Authorization: Bearer <token> or ?token= for /metrics (env TRACELOG_METRICS_TOKEN)")
 	fs.Usage = func() {
 		fmt.Println("Usage: tracelog serve [options]")
 		fmt.Println("\nStart hub + local agent in combined mode.")
@@ -27,6 +28,7 @@ func parseHubFlags(cfg *models.Config) {
 	fs.IntVar(&cfg.Port, "port", cfg.Port, "Port to listen on")
 	fs.StringVar(&cfg.BindAddress, "bind", cfg.BindAddress, "Bind address")
 	fs.StringVar(&cfg.DataDir, "data", cfg.DataDir, "Data directory")
+	fs.StringVar(&cfg.MetricsToken, "metrics-token", cfg.MetricsToken, "If set, require Authorization: Bearer <token> or ?token= for /metrics")
 	fs.Usage = func() {
 		fmt.Println("Usage: tracelog hub [options]")
 		fmt.Println("\nStart hub only (for multi-server setup).")

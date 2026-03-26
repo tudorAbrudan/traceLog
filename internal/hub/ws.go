@@ -28,6 +28,12 @@ func newWSHub() *wsHub {
 	}
 }
 
+func (w *wsHub) connectedAgents() int {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return len(w.agents)
+}
+
 type wsMessage struct {
 	Type string          `json:"type"`
 	Data json.RawMessage `json:"data"`
@@ -100,7 +106,7 @@ func (h *Hub) processAgentMessage(ctx context.Context, serverID string, msg *wsM
 			return
 		}
 		m.ServerID = serverID
-		if err := h.store.InsertMetrics(ctx, &m); err != nil {
+		if err := h.IngestMetrics(ctx, &m); err != nil {
 			slog.Error("Failed to store metrics", "error", err)
 		}
 
@@ -112,9 +118,9 @@ func (h *Hub) processAgentMessage(ctx context.Context, serverID string, msg *wsM
 		}
 		for i := range metrics {
 			metrics[i].ServerID = serverID
-			if err := h.store.InsertDockerMetrics(ctx, &metrics[i]); err != nil {
-				slog.Error("Failed to store docker metrics", "error", err)
-			}
+		}
+		if err := h.IngestDockerMetrics(ctx, metrics); err != nil {
+			slog.Error("Failed to store docker metrics", "error", err)
 		}
 
 	case "process_metrics":
@@ -126,7 +132,7 @@ func (h *Hub) processAgentMessage(ctx context.Context, serverID string, msg *wsM
 		for i := range metrics {
 			metrics[i].ServerID = serverID
 		}
-		if err := h.store.InsertProcessMetrics(ctx, metrics); err != nil {
+		if err := h.IngestProcessMetrics(ctx, metrics); err != nil {
 			slog.Error("Failed to store process metrics", "error", err)
 		}
 
@@ -137,7 +143,7 @@ func (h *Hub) processAgentMessage(ctx context.Context, serverID string, msg *wsM
 			return
 		}
 		entry.ServerID = serverID
-		if err := h.store.InsertAccessLog(ctx, &entry); err != nil {
+		if err := h.IngestAccessLog(ctx, &entry); err != nil {
 			slog.Error("Failed to store access log entry", "error", err)
 		}
 
@@ -148,7 +154,7 @@ func (h *Hub) processAgentMessage(ctx context.Context, serverID string, msg *wsM
 			return
 		}
 		entry.ServerID = serverID
-		if err := h.store.InsertLog(ctx, &entry); err != nil {
+		if err := h.IngestLog(ctx, &entry); err != nil {
 			slog.Error("Failed to store log entry", "error", err)
 		}
 

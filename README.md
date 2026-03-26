@@ -16,6 +16,7 @@
 - **Easy Install** — One-line installer with auto-detection; **`tracelog upgrade`** pulls the latest release with checksum verification
 - **30-Day Retention** — Configurable automatic data cleanup
 - **Multi-Server** — Hub/Agent architecture with WebSocket transport
+- **Prometheus** — `GET /metrics` exposition format for Grafana / alerting (optional Bearer token)
 
 ## Quick Start
 
