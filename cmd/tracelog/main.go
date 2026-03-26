@@ -313,8 +313,10 @@ func cmdRestore() {
 
 func cmdInstall() {
 	fmt.Printf("TraceLog %s - Interactive Installer\n\n", version)
-	fmt.Println("For automated installation, use the install script:")
+	fmt.Println("Install (works with or without Go — release tarball or go install fallback):")
 	fmt.Println("  curl -sSL https://raw.githubusercontent.com/tudorAbrudan/tracelog/main/scripts/install.sh | bash")
+	fmt.Println("Uninstall:")
+	fmt.Println("  curl -sSL https://raw.githubusercontent.com/tudorAbrudan/tracelog/main/scripts/uninstall.sh | sudo bash")
 	fmt.Println()
 	fmt.Println("Or start the hub directly:")
 	fmt.Println("  tracelog serve")
@@ -328,9 +330,8 @@ func cmdUninstall() {
 		fmt.Println()
 		fmt.Println("Or manually:")
 		fmt.Println("  sudo systemctl stop tracelog && sudo systemctl disable tracelog")
-		fmt.Println("  sudo rm /etc/systemd/system/tracelog.service")
-		fmt.Println("  sudo rm /usr/local/bin/tracelog")
-		fmt.Println("  sudo rm -rf /var/lib/tracelog")
+		fmt.Println("  curl -sSL https://raw.githubusercontent.com/tudorAbrudan/tracelog/main/scripts/uninstall.sh | sudo bash")
+		fmt.Println("  # or: sudo rm /etc/systemd/system/tracelog.service && sudo rm -f /usr/local/bin/tracelog && sudo rm -rf /etc/tracelog /var/lib/tracelog")
 		return
 	}
 
@@ -346,6 +347,9 @@ func cmdUninstall() {
 	os.Remove("/etc/systemd/system/tracelog.service")
 	exec("systemctl", "daemon-reload")
 	fmt.Println("Removed systemd service")
+
+	_ = os.RemoveAll("/etc/tracelog")
+	fmt.Println("Removed /etc/tracelog (if present)")
 
 	// Ask about data
 	fmt.Print("\nDelete all data (/var/lib/tracelog)? [y/N] ")

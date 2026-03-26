@@ -20,28 +20,48 @@
 
 ## Quick Start
 
-### One-Line Install
+### Install (one command — with or without Go)
+
+The same installer works on every supported server (Linux/macOS, `amd64` / `arm64`):
+
+1. **If you have a [GitHub Release](https://github.com/tudorAbrudan/tracelog/releases)** with `tracelog_linux_amd64.tar.gz` (or `arm64`), it downloads the binary — **no Go needed**.
+2. **If there is no release yet**, it falls back to **`go install`** with `GOTOOLCHAIN=auto` (Go may download a matching toolchain) — **Go must be installed**.
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/tudorAbrudan/tracelog/main/scripts/install.sh | bash
 ```
 
-### Manual Install
+On Linux this also creates the `tracelog` user, `/var/lib/tracelog`, `/etc/tracelog/config.yaml`, and a **systemd** service on port **8090**. Open `http://your-server:8090` and log in (installer prints the initial `admin` password when it can).
+
+Use `sudo bash` if the script asks for privilege escalation (it uses `sudo` internally for system paths).
+
+### Uninstall (restore system to pre-install state)
+
+Removes the **systemd** unit, **`/usr/local/bin/tracelog`**, and **`/etc/tracelog`**. You are prompted whether to delete **`/var/lib/tracelog`** (database and generated data). To remove **everything** without prompts:
 
 ```bash
-# Download the binary (or build from source)
+curl -sSL https://raw.githubusercontent.com/tudorAbrudan/tracelog/main/scripts/uninstall.sh | sudo bash -s -- --yes
+```
+
+Equivalent non-interactive flag via environment:
+
+```bash
+TRACELOG_UNINSTALL_YES=1 curl -sSL https://raw.githubusercontent.com/tudorAbrudan/tracelog/main/scripts/uninstall.sh | sudo -E bash
+```
+
+If you keep data, the `tracelog` system user may remain (owns `/var/lib/tracelog`); the script tells you how to remove it later.
+
+**Alternative:** `sudo tracelog uninstall` (interactive; also removes `/etc/tracelog`).
+
+### Manual install (only Go)
+
+```bash
 go install github.com/tudorAbrudan/tracelog/cmd/tracelog@latest
-
-# Create an admin user
 tracelog user create admin
-
-# Start monitoring
 tracelog serve
 ```
 
-Open `http://your-server:8090` and log in.
-
-### Build from Source
+### Build from source
 
 ```bash
 git clone https://github.com/tudorAbrudan/tracelog.git
@@ -98,7 +118,7 @@ tracelog help           # Show all commands
 
 ```bash
 tracelog serve --port 8090 --bind 0.0.0.0 --data /var/lib/tracelog
-tracelog agent --hub-url http://hub:8090 --api-key tl_your_key_here
+tracelog agent --hub http://hub:8090 --key tl_your_key_here
 ```
 
 ### Reverse Proxy (nginx)

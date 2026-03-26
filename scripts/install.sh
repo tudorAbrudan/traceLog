@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
+# TraceLog installer: GitHub release tarball first, then "go install" fallback (GOTOOLCHAIN=auto).
+# Uninstall: curl -sSL https://raw.githubusercontent.com/tudorAbrudan/tracelog/main/scripts/uninstall.sh | sudo bash
 set -euo pipefail
 
+# Set by try_release_download when a release is found; default for messages only.
 REPO="tudorAbrudan/tracelog"
 BINARY_NAME="tracelog"
 INSTALL_DIR="/usr/local/bin"
@@ -51,38 +54,85 @@ detect_platform() {
     info "Detected: ${OS} ${ARCH}"
 }
 
-# Download latest release
-download_binary() {
-    info "Downloading latest TraceLog..."
+# Try GitHub release tarball (no Go required)
+try_release_download() {
+    info "Trying GitHub release binary..."
 
-    LATEST=$(curl -sL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+    local LATEST=""
+    local r=""
+    for r in "tudorAbrudan/tracelog" "tudorAbrudan/traceLog"; do
+        LATEST=$(curl -sL "https://api.github.com/repos/${r}/releases/latest" | grep '"tag_name"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+        if [ -n "$LATEST" ] && [ "$LATEST" != "null" ]; then
+            REPO="$r"
+            break
+        fi
+        LATEST=""
+    done
 
     if [ -z "$LATEST" ]; then
-        warn "Could not fetch latest release, using main branch binary"
-        # Fallback: build from source or use a direct URL
-        error "No releases found. Please build from source: go build -o tracelog ./cmd/tracelog"
-        exit 1
+        warn "No GitHub release found for this repo."
+        return 1
     fi
 
-    ARCHIVE="${BINARY_NAME}_${OS}_${ARCH}.tar.gz"
-    DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${LATEST}/${ARCHIVE}"
+    local ARCHIVE="${BINARY_NAME}_${OS}_${ARCH}.tar.gz"
+    local DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${LATEST}/${ARCHIVE}"
 
     if ! curl -sL -f -o "/tmp/${ARCHIVE}" "$DOWNLOAD_URL"; then
-        error "Download failed from: $DOWNLOAD_URL"
-        exit 1
+        warn "Release download failed: $DOWNLOAD_URL"
+        rm -f "/tmp/${ARCHIVE}"
+        return 1
     fi
 
     rm -f "/tmp/${BINARY_NAME}"
     tar -xzf "/tmp/${ARCHIVE}" -C /tmp "${BINARY_NAME}" 2>/dev/null || tar -xzf "/tmp/${ARCHIVE}" -C /tmp
+    rm -f "/tmp/${ARCHIVE}"
     if [ ! -f "/tmp/${BINARY_NAME}" ]; then
-        error "Archive did not contain ${BINARY_NAME}"
-        exit 1
+        warn "Archive did not contain ${BINARY_NAME}"
+        return 1
     fi
 
     chmod +x "/tmp/${BINARY_NAME}"
     sudo mv "/tmp/${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}"
-    rm -f "/tmp/${ARCHIVE}"
-    ok "Installed to ${INSTALL_DIR}/${BINARY_NAME}"
+    ok "Installed release to ${INSTALL_DIR}/${BINARY_NAME}"
+    return 0
+}
+
+# Fallback: go install (needs Go; GOTOOLCHAIN=auto can install a newer toolchain)
+install_via_go() {
+    info "Installing via Go (go install)..."
+    if ! command -v go &>/dev/null; then
+        return 1
+    fi
+    export GOTOOLCHAIN=auto
+    local tmp
+    tmp=$(mktemp -d)
+    export GOBIN="$tmp"
+    if ! go install github.com/tudorAbrudan/tracelog/cmd/tracelog@latest; then
+        rm -rf "$tmp"
+        return 1
+    fi
+    if [ ! -f "$tmp/${BINARY_NAME}" ]; then
+        rm -rf "$tmp"
+        return 1
+    fi
+    chmod +x "$tmp/${BINARY_NAME}"
+    sudo mv "$tmp/${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}"
+    rm -rf "$tmp"
+    ok "Installed via go install to ${INSTALL_DIR}/${BINARY_NAME}"
+    return 0
+}
+
+obtain_binary() {
+    if try_release_download; then
+        return 0
+    fi
+    if install_via_go; then
+        return 0
+    fi
+    error "Could not install TraceLog."
+    error "Options: (1) Publish a GitHub release with ${BINARY_NAME}_${OS}_${ARCH}.tar.gz, or"
+    error "          (2) Install Go from https://go.dev/dl/ and re-run this script."
+    exit 1
 }
 
 # Create system user
@@ -250,7 +300,7 @@ main() {
     if command -v tracelog &>/dev/null; then
         ok "TraceLog already installed: $(tracelog version 2>/dev/null || echo 'unknown version')"
     else
-        download_binary
+        obtain_binary
     fi
 
     if [ "$MODE" = "agent" ]; then
