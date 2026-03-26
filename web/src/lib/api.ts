@@ -1,4 +1,10 @@
-const BASE = '/api';
+function apiBase(): string {
+  if (typeof document === 'undefined') return '/api';
+  const raw = document.querySelector('meta[name="tracelog-url-prefix"]')?.getAttribute('content');
+  if (!raw || raw === '__TRACELOG_URL_PREFIX__') return '/api';
+  const prefix = raw.replace(/\/$/, '');
+  return `${prefix}/api`;
+}
 
 let csrfToken = '';
 
@@ -8,7 +14,7 @@ async function request(method: string, path: string, body?: unknown) {
     headers['X-CSRF-Token'] = csrfToken;
   }
 
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await fetch(`${apiBase()}${path}`, {
     method,
     headers,
     credentials: 'same-origin',

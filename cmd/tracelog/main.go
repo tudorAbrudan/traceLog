@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	osexec "os/exec"
+	"strings"
 	"time"
 
 	"github.com/tudorAbrudan/tracelog/internal/agent"
@@ -15,6 +16,21 @@ import (
 )
 
 var version = "dev"
+
+// applyDataDirEnv sets cfg.DataDir from TRACELOG_DATA_DIR (used by systemd and install.sh so CLI matches the service DB).
+func applyDataDirEnv(cfg *models.Config) {
+	if p := strings.TrimSpace(os.Getenv("TRACELOG_DATA_DIR")); p != "" {
+		cfg.DataDir = p
+	}
+}
+
+// applyURLPrefixEnv sets cfg.URLPathPrefix from TRACELOG_URL_PREFIX (e.g. /tracelog when served under that path).
+func applyURLPrefixEnv(cfg *models.Config) {
+	if p := strings.TrimSpace(os.Getenv("TRACELOG_URL_PREFIX")); p != "" {
+		cfg.URLPathPrefix = p
+	}
+	cfg.URLPathPrefix = models.NormalizeURLPathPrefix(cfg.URLPathPrefix)
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -83,9 +99,11 @@ Run 'tracelog <command> --help' for details on a specific command.
 
 func cmdServe() {
 	cfg := models.DefaultConfig()
+	applyDataDirEnv(cfg)
 	cfg.Mode = "serve"
 	cfg.Version = version
 	parseServeFlags(cfg)
+	applyURLPrefixEnv(cfg)
 
 	h, err := hub.New(cfg)
 	if err != nil {
@@ -105,9 +123,11 @@ func cmdServe() {
 
 func cmdHub() {
 	cfg := models.DefaultConfig()
+	applyDataDirEnv(cfg)
 	cfg.Mode = "hub"
 	cfg.Version = version
 	parseHubFlags(cfg)
+	applyURLPrefixEnv(cfg)
 
 	h, err := hub.New(cfg)
 	if err != nil {
@@ -143,6 +163,7 @@ func cmdUser() {
 	}
 
 	cfg := models.DefaultConfig()
+	applyDataDirEnv(cfg)
 
 	s, err := store.New(cfg.DataDir)
 	if err != nil {
@@ -208,6 +229,7 @@ func cmdUser() {
 
 func cmdStatus() {
 	cfg := models.DefaultConfig()
+	applyDataDirEnv(cfg)
 	dbPath := cfg.DataDir + "/tracelog.db"
 
 	fmt.Printf("TraceLog %s\n\n", version)
@@ -242,6 +264,7 @@ func cmdStatus() {
 
 func cmdBackup() {
 	cfg := models.DefaultConfig()
+	applyDataDirEnv(cfg)
 	src := cfg.DataDir + "/tracelog.db"
 
 	if _, err := os.Stat(src); os.IsNotExist(err) {
@@ -277,6 +300,7 @@ func cmdRestore() {
 	}
 	backupPath := os.Args[2]
 	cfg := models.DefaultConfig()
+	applyDataDirEnv(cfg)
 	dst := cfg.DataDir + "/tracelog.db"
 
 	if _, err := os.Stat(backupPath); os.IsNotExist(err) {

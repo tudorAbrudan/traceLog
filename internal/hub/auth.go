@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/tudorAbrudan/tracelog/internal/models"
 )
 
 type contextKey string
@@ -70,6 +72,14 @@ func (rl *loginRateLimiter) record(ip string) {
 	rl.attempts[ip] = append(rl.attempts[ip], time.Now())
 }
 
+func (h *Hub) cookiePath() string {
+	p := models.NormalizeURLPathPrefix(h.cfg.URLPathPrefix)
+	if p == "" {
+		return "/"
+	}
+	return p
+}
+
 // Auth middleware
 
 func (h *Hub) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
@@ -85,7 +95,7 @@ func (h *Hub) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			http.SetCookie(w, &http.Cookie{
 				Name:     "tracelog_session",
 				Value:    "",
-				Path:     "/",
+				Path:     h.cookiePath(),
 				MaxAge:   -1,
 				HttpOnly: true,
 				SameSite: http.SameSiteStrictMode,
@@ -176,7 +186,7 @@ func (h *Hub) handleLogin(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "tracelog_session",
 		Value:    token,
-		Path:     "/",
+		Path:     h.cookiePath(),
 		Expires:  expiresAt,
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
@@ -185,7 +195,7 @@ func (h *Hub) handleLogin(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "tracelog_csrf",
 		Value:    csrfToken,
-		Path:     "/",
+		Path:     h.cookiePath(),
 		Expires:  expiresAt,
 		SameSite: http.SameSiteStrictMode,
 	})
@@ -209,7 +219,7 @@ func (h *Hub) handleLogout(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "tracelog_session",
 		Value:    "",
-		Path:     "/",
+		Path:     h.cookiePath(),
 		MaxAge:   -1,
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
@@ -217,7 +227,7 @@ func (h *Hub) handleLogout(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "tracelog_csrf",
 		Value:    "",
-		Path:     "/",
+		Path:     h.cookiePath(),
 		MaxAge:   -1,
 		SameSite: http.SameSiteStrictMode,
 	})
@@ -293,7 +303,7 @@ func (h *Hub) handleSetup(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "tracelog_session",
 		Value:    token,
-		Path:     "/",
+		Path:     h.cookiePath(),
 		Expires:  expiresAt,
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
@@ -301,7 +311,7 @@ func (h *Hub) handleSetup(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "tracelog_csrf",
 		Value:    csrfToken,
-		Path:     "/",
+		Path:     h.cookiePath(),
 		Expires:  expiresAt,
 		SameSite: http.SameSiteStrictMode,
 	})

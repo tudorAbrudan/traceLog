@@ -46,6 +46,19 @@ rm -f /etc/systemd/system/tracelog.service
 systemctl daemon-reload 2>/dev/null || true
 echo "Removed systemd unit."
 
+# TraceLog nginx site + snippet (from production install.sh)
+NGINX_SITE_NAME="tracelog"
+rm -f "/etc/nginx/sites-enabled/${NGINX_SITE_NAME}" 2>/dev/null || true
+rm -f "/etc/nginx/sites-available/${NGINX_SITE_NAME}" 2>/dev/null || true
+rm -f "/etc/nginx/conf.d/${NGINX_SITE_NAME}.conf" 2>/dev/null || true
+rm -f /etc/nginx/snippets/tracelog-proxy.conf 2>/dev/null || true
+rm -f /etc/nginx/snippets/tracelog-subpath-loc.conf 2>/dev/null || true
+rm -f /etc/nginx/conf.d/tracelog-subpath-map.conf 2>/dev/null || true
+if command -v nginx &>/dev/null && nginx -t 2>/dev/null; then
+	systemctl reload nginx 2>/dev/null || true
+	echo "Removed nginx TraceLog site (if present)."
+fi
+
 [[ -f "$BINARY" ]] && rm -f "$BINARY" && echo "Removed ${BINARY}."
 
 [[ -d "$CONFIG_DIR" ]] && rm -rf "$CONFIG_DIR" && echo "Removed ${CONFIG_DIR}."

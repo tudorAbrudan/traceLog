@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -49,7 +50,7 @@ func (t *WSTransport) SetServerID(id string) {
 }
 
 func (t *WSTransport) Connect(ctx context.Context) error {
-	url := fmt.Sprintf("%s/api/ws/agent", t.hubURL)
+	url := fmt.Sprintf("%s/api/ws/agent", strings.TrimSuffix(t.hubURL, "/"))
 
 	headers := http.Header{}
 	headers.Set("X-API-Key", t.apiKey)

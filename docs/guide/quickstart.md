@@ -11,8 +11,9 @@ This will:
 2. Create a system user and data directory
 3. Auto-detect Docker, web servers, and common log files
 4. Create an admin account
-5. Set up and start a systemd service
-6. Open the firewall port if needed
+5. Set up and start a systemd service (TraceLog on `127.0.0.1:8090` on Linux)
+6. Install **nginx** and proxy **port 80** to TraceLog (production default); open **80/443** in ufw when asked, not 8090
+7. Optional HTTPS: set `TRACELOG_DOMAIN` and `TRACELOG_LETSENCRYPT_EMAIL` when running the installer for **certbot**
 
 ## Manual Install
 
@@ -51,7 +52,7 @@ Save the generated password — it's shown only once.
 tracelog serve
 ```
 
-Open `http://your-server:8090` in your browser and log in.
+On Linux after the one-line install, open **`http://your-server-ip/`** (nginx). For a local dev run without nginx, use `http://localhost:8090`.
 
 ## Build from Source
 

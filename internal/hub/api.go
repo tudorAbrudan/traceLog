@@ -463,7 +463,7 @@ func (h *Hub) handleDetect(w http.ResponseWriter, r *http.Request) {
 // --- Dashboard ---
 
 func (h *Hub) handleDashboard(w http.ResponseWriter, r *http.Request) {
-	spaHandler().ServeHTTP(w, r)
+	h.dashboardSPA().ServeHTTP(w, r)
 }
 
 // --- Helpers ---

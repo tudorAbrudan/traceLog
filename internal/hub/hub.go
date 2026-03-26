@@ -33,6 +33,9 @@ type Hub struct {
 
 	dockerLogMu      sync.Mutex
 	dockerLogWaiters map[string]chan dockerLogResult
+
+	spaOnce sync.Once
+	spaH    http.Handler
 }
 
 func New(cfg *models.Config) (*Hub, error) {
@@ -293,4 +296,12 @@ func (h *Hub) registerRoutes() {
 
 	// Dashboard SPA
 	h.mux.HandleFunc("GET /", h.handleDashboard)
+}
+
+func (h *Hub) dashboardSPA() http.Handler {
+	h.spaOnce.Do(func() {
+		prefix := models.NormalizeURLPathPrefix(h.cfg.URLPathPrefix)
+		h.spaH = NewSPAHandler(prefix)
+	})
+	return h.spaH
 }

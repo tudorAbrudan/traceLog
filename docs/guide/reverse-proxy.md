@@ -49,12 +49,38 @@ monitor.example.com {
 
 Caddy automatically handles HTTPS certificates.
 
+## Subpath on an existing site (`https://example.com/tracelog/`)
+
+Use this when another app already serves `/` on the same host (e.g. `cadourile.ro`).
+
+1. Run the installer with a path prefix (no trailing slash):
+
+   ```bash
+   sudo TRACELOG_URL_PREFIX=/tracelog bash scripts/install.sh
+   ```
+
+   Or set **`Environment=TRACELOG_URL_PREFIX=/tracelog`** and **`--url-prefix /tracelog`** on `tracelog serve` in systemd.
+
+2. The installer writes **`/etc/nginx/conf.d/tracelog-subpath-map.conf`** (WebSocket `map`) and **`/etc/nginx/snippets/tracelog-subpath-loc.conf`** (`location /tracelog/` → `http://127.0.0.1:8090/` with the path stripped).
+
+3. Inside your **existing** `server { }` for that domain (usually the HTTPS block), add:
+
+   ```nginx
+   include /etc/nginx/snippets/tracelog-subpath-loc.conf;
+   ```
+
+   Then `sudo nginx -t && sudo systemctl reload nginx`.
+
+4. Open **`https://your-domain/tracelog/`**. For **remote agents**, set the hub URL to **`https://your-domain/tracelog`** (no trailing slash is fine).
+
+The UI and API use the prefix at runtime (embedded `index.html` placeholder + cookie `Path`).
+
 ## When Using a Reverse Proxy
 
 Bind TraceLog to localhost only:
 
 ```bash
-tracelog serve --bind 127.0.0.1 --port 8090
+tracelog serve --bind 127.0.0.1 --port 8090 --url-prefix /tracelog
 ```
 
-This prevents direct access, forcing all traffic through the proxy.
+Omit `--url-prefix` when the proxy serves TraceLog at `/`. This prevents direct access, forcing all traffic through the proxy.

@@ -14,6 +14,7 @@ func parseServeFlags(cfg *models.Config) {
 	fs.StringVar(&cfg.BindAddress, "bind", cfg.BindAddress, "Bind address")
 	fs.StringVar(&cfg.DataDir, "data", cfg.DataDir, "Data directory")
 	fs.StringVar(&cfg.MetricsToken, "metrics-token", cfg.MetricsToken, "If set, require Authorization: Bearer <token> or ?token= for /metrics (env TRACELOG_METRICS_TOKEN)")
+	fs.StringVar(&cfg.URLPathPrefix, "url-prefix", cfg.URLPathPrefix, "Public URL path prefix behind a reverse proxy, e.g. /tracelog (env TRACELOG_URL_PREFIX)")
 	fs.Usage = func() {
 		fmt.Println("Usage: tracelog serve [options]")
 		fmt.Println("\nStart hub + local agent in combined mode.")
@@ -31,6 +32,7 @@ func parseHubFlags(cfg *models.Config) {
 	fs.StringVar(&cfg.BindAddress, "bind", cfg.BindAddress, "Bind address")
 	fs.StringVar(&cfg.DataDir, "data", cfg.DataDir, "Data directory")
 	fs.StringVar(&cfg.MetricsToken, "metrics-token", cfg.MetricsToken, "If set, require Authorization: Bearer <token> or ?token= for /metrics")
+	fs.StringVar(&cfg.URLPathPrefix, "url-prefix", cfg.URLPathPrefix, "Public URL path prefix behind a reverse proxy, e.g. /tracelog (env TRACELOG_URL_PREFIX)")
 	fs.Usage = func() {
 		fmt.Println("Usage: tracelog hub [options]")
 		fmt.Println("\nStart hub only (for multi-server setup).")

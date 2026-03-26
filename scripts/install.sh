@@ -2,6 +2,18 @@
 # TraceLog installer: (1) GitHub release tarball (2) system go install (3) download official Go from go.dev, then go install.
 # Override bootstrap Go versions: TRACELOG_BOOTSTRAP_GO="1.24.3 1.23.5"
 # Uninstall: curl -sSL https://raw.githubusercontent.com/tudorAbrudan/tracelog/main/scripts/uninstall.sh | sudo bash
+#
+# Production (Linux hub install, default):
+#   - tracelog listens on 127.0.0.1:8090 only
+#   - nginx reverse proxy on port 80 (and HTTPS via Let's Encrypt when configured)
+# Opt out (dev / direct port): TRACELOG_NO_PROXY=1
+# HTTPS (optional): set DNS A/AAAA to this host, then e.g.:
+#   sudo TRACELOG_DOMAIN=monitor.example.com TRACELOG_LETSENCRYPT_EMAIL=you@example.com bash scripts/install.sh
+#
+# Subpath on an existing site (e.g. https://example.com/tracelog/):
+#   sudo TRACELOG_URL_PREFIX=/tracelog bash scripts/install.sh
+# Then add inside your existing server { } block (SSL site):
+#   include /etc/nginx/snippets/tracelog-subpath-loc.conf;
 set -euo pipefail
 
 # Set by try_release_download when a release is found; default for messages only.
@@ -12,6 +24,7 @@ CONFIG_DIR="/etc/tracelog"
 DATA_DIR="/var/lib/tracelog"
 SERVICE_USER="tracelog"
 DEFAULT_PORT=8090
+NGINX_SITE_NAME="tracelog"
 
 # Colors
 RED='\033[0;31m'
@@ -244,34 +257,45 @@ detect_services() {
     fi
 }
 
-# Create admin user and generate password
+# Create admin user and generate password (same DB path as systemd via TRACELOG_DATA_DIR)
 create_admin() {
     info "Creating admin account..."
-    ADMIN_PASS=$(sudo -u "$SERVICE_USER" "${INSTALL_DIR}/${BINARY_NAME}" user create admin 2>/dev/null | grep "Password:" | awk '{print $2}') || \
-    ADMIN_PASS=$("${INSTALL_DIR}/${BINARY_NAME}" user create admin 2>/dev/null | grep "Password:" | awk '{print $2}')
-
+    local out ec
+    set +e
+    out=$(sudo -u "$SERVICE_USER" env TRACELOG_DATA_DIR="$DATA_DIR" HOME="$DATA_DIR" "${INSTALL_DIR}/${BINARY_NAME}" user create admin 2>&1)
+    ec=$?
+    set -e
+    ADMIN_PASS=$(printf '%s\n' "$out" | grep "Password:" | head -1 | awk '{print $2}')
     if [ -z "$ADMIN_PASS" ]; then
-        ADMIN_PASS="check-tracelog-output"
-        warn "Could not capture password. Run: tracelog user create admin"
+        if [ "$ec" -ne 0 ]; then
+            warn "$out"
+        fi
+        warn "Could not capture admin password (user may already exist)."
+        warn "Use the web UI (first-time setup) or run:"
+        warn "  sudo -u ${SERVICE_USER} env TRACELOG_DATA_DIR=${DATA_DIR} ${INSTALL_DIR}/${BINARY_NAME} user reset-password admin"
     fi
 }
 
-# Generate config file
+# Generate config file (serve mode uses BIND_ADDRESS: 127.0.0.1 behind nginx, or 0.0.0.0 if TRACELOG_NO_PROXY=1)
 generate_config() {
     local mode="${1:-serve}"
     local hub_url="${2:-}"
     local api_key="${3:-}"
 
     if [ "$mode" = "serve" ]; then
+        local url_line=""
+        if [ -n "${URL_PREFIX:-}" ]; then
+            url_line="url_path_prefix: ${URL_PREFIX}"$'\n'
+        fi
         cat <<YAML | sudo tee "${CONFIG_DIR}/config.yaml" > /dev/null
 mode: serve
 port: ${DEFAULT_PORT}
-bind_address: "0.0.0.0"
+bind_address: "${BIND_ADDRESS}"
 data_dir: ${DATA_DIR}
-collect:
+${url_line}collect:
   interval_seconds: 10
   system: true
-  docker: ${DOCKER_FOUND}
+  docker: ${DOCKER_FOUND:-false}
 YAML
     else
         cat <<YAML | sudo tee "${CONFIG_DIR}/config.yaml" > /dev/null
@@ -281,7 +305,7 @@ api_key: "${api_key}"
 collect:
   interval_seconds: 10
   system: true
-  docker: ${DOCKER_FOUND}
+  docker: ${DOCKER_FOUND:-false}
 YAML
     fi
 
@@ -295,6 +319,11 @@ create_service() {
         return
     fi
 
+    local bind_flag=""
+    if [ "${BIND_ADDRESS}" = "127.0.0.1" ]; then
+        bind_flag=" --bind 127.0.0.1"
+    fi
+
     cat <<UNIT | sudo tee /etc/systemd/system/tracelog.service > /dev/null
 [Unit]
 Description=TraceLog Server Monitoring
@@ -304,7 +333,9 @@ Wants=docker.service
 [Service]
 Type=simple
 User=${SERVICE_USER}
-ExecStart=${INSTALL_DIR}/${BINARY_NAME} serve --port ${DEFAULT_PORT}
+Environment=TRACELOG_DATA_DIR=${DATA_DIR}
+$( [ -n "${URL_PREFIX:-}" ] && echo "Environment=TRACELOG_URL_PREFIX=${URL_PREFIX}" )
+ExecStart=${INSTALL_DIR}/${BINARY_NAME} serve --port ${DEFAULT_PORT}${bind_flag}$( [ -n "${URL_PREFIX:-}" ] && echo " --url-prefix ${URL_PREFIX}" )
 Restart=always
 RestartSec=5
 WorkingDirectory=${DATA_DIR}
@@ -322,17 +353,246 @@ UNIT
 
 # Check firewall
 check_firewall() {
-    if command -v ufw &>/dev/null && sudo ufw status | grep -q "active"; then
-        if ! sudo ufw status | grep -q "$DEFAULT_PORT"; then
+    if ! command -v ufw &>/dev/null || ! sudo ufw status 2>/dev/null | grep -q "active"; then
+        return 0
+    fi
+    if [ "${PROD_PROXY:-0}" = "1" ]; then
+        local need=()
+        sudo ufw status | grep -qE '(^| )80/tcp' || need+=("80/tcp")
+        sudo ufw status | grep -qE '(^| )443/tcp' || need+=("443/tcp")
+        if [ "${#need[@]}" -gt 0 ]; then
             echo ""
-            read -p "  Port ${DEFAULT_PORT} may be blocked by ufw. Open it? [Y/n] " -r REPLY
+            read -p "  ufw is active; open HTTP/HTTPS (${need[*]}) for nginx? [Y/n] " -r REPLY
             REPLY=${REPLY:-Y}
             if [[ "$REPLY" =~ ^[Yy]$ ]]; then
-                sudo ufw allow "$DEFAULT_PORT"/tcp
-                ok "Firewall: port ${DEFAULT_PORT} opened"
+                for p in "${need[@]}"; do
+                    sudo ufw allow "$p"
+                done
+                ok "Firewall: ${need[*]} allowed (TraceLog stays on 127.0.0.1:${DEFAULT_PORT})"
             fi
         fi
+        return 0
     fi
+    if ! sudo ufw status | grep -q "$DEFAULT_PORT"; then
+        echo ""
+        read -p "  Port ${DEFAULT_PORT} may be blocked by ufw. Open it? [Y/n] " -r REPLY
+        REPLY=${REPLY:-Y}
+        if [[ "$REPLY" =~ ^[Yy]$ ]]; then
+            sudo ufw allow "$DEFAULT_PORT"/tcp
+            ok "Firewall: port ${DEFAULT_PORT} opened"
+        fi
+    fi
+}
+
+# Install nginx via package manager (best effort)
+pkg_install_nginx() {
+    if command -v nginx &>/dev/null; then
+        return 0
+    fi
+    info "Installing nginx..."
+    if command -v apt-get &>/dev/null; then
+        sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nginx
+    elif command -v dnf &>/dev/null; then
+        sudo dnf install -y nginx
+    elif command -v yum &>/dev/null; then
+        sudo yum install -y nginx
+    elif command -v zypper &>/dev/null; then
+        sudo zypper install -y nginx
+    else
+        warn "Could not install nginx automatically; install nginx, then re-run this script or add a site manually."
+        return 1
+    fi
+    ok "nginx installed"
+}
+
+# Write nginx site for TraceLog (WebSocket-safe map)
+write_nginx_site() {
+    local domain="${TRACELOG_DOMAIN:-}"
+    local use_default_server=""
+    local server_names="_"
+
+    if [ -n "$domain" ]; then
+        server_names="$domain"
+        use_default_server=""
+    else
+        use_default_server=" default_server"
+    fi
+
+    local listen_v4="listen 80${use_default_server};"
+    local listen_v6
+    if [ -z "$domain" ]; then
+        listen_v6="listen [::]:80${use_default_server};"
+    else
+        listen_v6="listen [::]:80;"
+    fi
+
+    sudo mkdir -p /etc/nginx/snippets
+    sudo tee /etc/nginx/snippets/tracelog-proxy.conf > /dev/null <<'SNIP'
+proxy_pass http://127.0.0.1:8090;
+proxy_http_version 1.1;
+proxy_set_header Host $host;
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $scheme;
+proxy_set_header Upgrade $http_upgrade;
+proxy_set_header Connection $connection_upgrade;
+proxy_read_timeout 86400;
+proxy_send_timeout 86400;
+SNIP
+
+    if [ -d /etc/nginx/sites-available ] && [ -d /etc/nginx/sites-enabled ]; then
+        sudo tee "/etc/nginx/sites-available/${NGINX_SITE_NAME}" > /dev/null <<EOF
+map \$http_upgrade \$connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+server {
+    ${listen_v4}
+    ${listen_v6}
+    server_name ${server_names};
+
+    location / {
+        include snippets/tracelog-proxy.conf;
+    }
+}
+EOF
+        sudo ln -sf "/etc/nginx/sites-available/${NGINX_SITE_NAME}" "/etc/nginx/sites-enabled/${NGINX_SITE_NAME}"
+        if [ -z "$domain" ] && [ -f /etc/nginx/sites-enabled/default ]; then
+            sudo rm -f /etc/nginx/sites-enabled/default
+            info "Disabled default nginx site so TraceLog is the port 80 default (restore from /etc/nginx/sites-available/default if needed)."
+        fi
+    else
+        if [ -z "$domain" ] && [ -f /etc/nginx/conf.d/default.conf ]; then
+            sudo mv /etc/nginx/conf.d/default.conf "/etc/nginx/conf.d/default.conf.bak-tracelog-$(date +%s)" 2>/dev/null || true
+            info "Renamed default /etc/nginx/conf.d/default.conf so TraceLog can bind port 80 (backup with .bak-tracelog- prefix)."
+        fi
+        sudo tee "/etc/nginx/conf.d/${NGINX_SITE_NAME}.conf" > /dev/null <<EOF
+map \$http_upgrade \$connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+server {
+    ${listen_v4}
+    ${listen_v6}
+    server_name ${server_names};
+
+    location / {
+        include snippets/tracelog-proxy.conf;
+    }
+}
+EOF
+    fi
+}
+
+# Optional: Let's Encrypt when domain + email are set
+maybe_certbot() {
+    local domain="${TRACELOG_DOMAIN:-}"
+    local email="${TRACELOG_LETSENCRYPT_EMAIL:-}"
+    if [ -z "$domain" ] || [ -z "$email" ]; then
+        if [ -n "$domain" ] && [ -z "$email" ]; then
+            warn "TRACELOG_DOMAIN is set but TRACELOG_LETSENCRYPT_EMAIL is empty — skipping certbot. Set the email and re-run, or run: sudo certbot --nginx -d ${domain}"
+        fi
+        return 0
+    fi
+    if [ ! -d "/etc/letsencrypt/live/${domain}" ]; then
+        info "Requesting TLS certificate (certbot)..."
+        if ! command -v certbot &>/dev/null; then
+            if command -v apt-get &>/dev/null; then
+                sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq certbot python3-certbot-nginx
+            elif command -v dnf &>/dev/null; then
+                sudo dnf install -y certbot python3-certbot-nginx
+            elif command -v yum &>/dev/null; then
+                sudo yum install -y certbot python3-certbot-nginx
+            else
+                warn "certbot not found; install certbot with the nginx plugin, then run: sudo certbot --nginx -d ${domain}"
+                return 0
+            fi
+        fi
+        if sudo certbot --nginx -d "$domain" --non-interactive --agree-tos -m "$email" --redirect; then
+            ok "HTTPS enabled for ${domain}"
+        else
+            warn "certbot failed (DNS must point here first). HTTP via nginx still works."
+        fi
+    else
+        ok "Existing Let's Encrypt cert for ${domain} — run sudo certbot renew if needed"
+    fi
+}
+
+# WebSocket map in conf.d (http context) + location snippet for server { } include
+write_nginx_subpath_snippets() {
+    sudo mkdir -p /etc/nginx/snippets /etc/nginx/conf.d
+    sudo tee /etc/nginx/conf.d/tracelog-subpath-map.conf > /dev/null <<'MAP'
+map $http_upgrade $tracelog_conn {
+    default upgrade;
+    '' close;
+}
+MAP
+    sudo tee /etc/nginx/snippets/tracelog-subpath-loc.conf > /dev/null <<EOF
+location ${URL_PREFIX}/ {
+    proxy_pass http://127.0.0.1:${DEFAULT_PORT}/;
+    proxy_http_version 1.1;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+    proxy_set_header Upgrade \$http_upgrade;
+    proxy_set_header Connection \$tracelog_conn;
+    proxy_read_timeout 86400;
+    proxy_send_timeout 86400;
+}
+EOF
+    ok "Wrote /etc/nginx/conf.d/tracelog-subpath-map.conf and /etc/nginx/snippets/tracelog-subpath-loc.conf"
+}
+
+# Subpath behind existing vhost (TRACELOG_URL_PREFIX=/tracelog)
+setup_nginx_subpath_only() {
+    if [ "$OS" != "linux" ] || [ -z "${URL_PREFIX:-}" ]; then
+        return 0
+    fi
+    info "Subpath mode: TraceLog at ${URL_PREFIX}/ (nginx snippets + systemd URL prefix)..."
+    if ! pkg_install_nginx; then
+        return 1
+    fi
+    write_nginx_subpath_snippets
+    if sudo nginx -t; then
+        sudo systemctl enable nginx 2>/dev/null || true
+        sudo systemctl reload nginx 2>/dev/null || sudo systemctl restart nginx
+        ok "nginx loaded TraceLog subpath map (conf.d)"
+    else
+        warn "nginx -t failed; fix config then: sudo nginx -t && sudo systemctl reload nginx"
+        return 1
+    fi
+    echo ""
+    warn "Add this line inside your existing site server { } (e.g. cadourile.ro SSL block):"
+    info "  include /etc/nginx/snippets/tracelog-subpath-loc.conf;"
+    warn "Then run: sudo nginx -t && sudo systemctl reload nginx"
+}
+
+# Production reverse proxy: nginx → 127.0.0.1:8090 (whole host, not subpath)
+setup_nginx_standalone_hub() {
+    if [ "${PROD_PROXY:-0}" != "1" ]; then
+        return 0
+    fi
+    if [ "$OS" != "linux" ]; then
+        return 0
+    fi
+    info "Configuring nginx reverse proxy (production)..."
+    if ! pkg_install_nginx; then
+        return 1
+    fi
+    write_nginx_site
+    if sudo nginx -t; then
+        sudo systemctl enable nginx 2>/dev/null || true
+        sudo systemctl restart nginx
+        ok "nginx serving TraceLog"
+    else
+        warn "nginx configuration test failed; fix /etc/nginx and run: sudo nginx -t && sudo systemctl reload nginx"
+        return 1
+    fi
+    maybe_certbot
 }
 
 # Get server IP
@@ -347,6 +607,29 @@ main() {
     MODE="${1:-}"
 
     detect_platform
+
+    PROD_PROXY=0
+    BIND_ADDRESS="0.0.0.0"
+    URL_PREFIX=""
+    if [ -n "${TRACELOG_URL_PREFIX:-}" ]; then
+        local p
+        p=$(echo "${TRACELOG_URL_PREFIX}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        if [ -n "$p" ] && [ "$p" != "/" ]; then
+            case "$p" in
+                /*) ;;
+                *) p="/$p" ;;
+            esac
+            p="${p%/}"
+            URL_PREFIX="$p"
+        fi
+    fi
+
+    if [ "$OS" = "linux" ] && [ "$MODE" != "agent" ]; then
+        if [ "${TRACELOG_NO_PROXY:-}" != "1" ]; then
+            PROD_PROXY=1
+            BIND_ADDRESS="127.0.0.1"
+        fi
+    fi
 
     # For now, try to use existing binary or inform user
     if command -v tracelog &>/dev/null; then
@@ -369,6 +652,13 @@ main() {
     fi
 
     create_service
+    if [ "$OS" = "linux" ] && [ "$MODE" != "agent" ]; then
+        if [ -n "${URL_PREFIX:-}" ]; then
+            setup_nginx_subpath_only || warn "Subpath nginx snippets incomplete — see messages above."
+        elif [ "${PROD_PROXY}" = "1" ]; then
+            setup_nginx_standalone_hub || warn "nginx setup incomplete — TraceLog is on http://127.0.0.1:${DEFAULT_PORT} only until nginx is fixed."
+        fi
+    fi
     check_firewall
     get_ip
 
@@ -377,8 +667,28 @@ main() {
     if [ "$MODE" = "agent" ]; then
         echo -e "${CYAN}  │  ${BOLD}Agent connected to hub${NC}${CYAN}               │${NC}"
     else
-        echo -e "${CYAN}  │  ${GREEN}${BOLD}Open: http://${IP}:${DEFAULT_PORT}${NC}${CYAN}${NC}"
-        echo -e "${CYAN}  │  ${BOLD}Login: admin / ${ADMIN_PASS}${NC}${CYAN}${NC}"
+        local url_msg=""
+        if [ -n "${URL_PREFIX:-}" ]; then
+            echo -e "${CYAN}  │  ${GREEN}${BOLD}Open: https://YOUR_DOMAIN${URL_PREFIX}/${NC}${CYAN} (use your real domain)"
+            echo -e "${CYAN}  │  ${BOLD}After include + reload nginx (see above). Hub URL for agents: https://YOUR_DOMAIN${URL_PREFIX}${NC}${CYAN}"
+        elif [ "${PROD_PROXY}" = "1" ]; then
+            if [ -n "${TRACELOG_DOMAIN:-}" ] && [ -f "/etc/letsencrypt/live/${TRACELOG_DOMAIN}/fullchain.pem" ]; then
+                url_msg="https://${TRACELOG_DOMAIN}/"
+            elif [ -n "${TRACELOG_DOMAIN:-}" ]; then
+                url_msg="http://${TRACELOG_DOMAIN}/ (enable HTTPS: set TRACELOG_LETSENCRYPT_EMAIL and re-run install, or certbot --nginx)"
+            else
+                url_msg="http://${IP}/"
+            fi
+            echo -e "${CYAN}  │  ${GREEN}${BOLD}Open: ${url_msg}${NC}${CYAN}${NC}"
+            echo -e "${CYAN}  │  ${BOLD}(TraceLog listens on 127.0.0.1:${DEFAULT_PORT} — use nginx only.)${NC}${CYAN}"
+        else
+            echo -e "${CYAN}  │  ${GREEN}${BOLD}Open: http://${IP}:${DEFAULT_PORT}${NC}${CYAN}${NC}"
+        fi
+        if [ -n "${ADMIN_PASS:-}" ]; then
+            echo -e "${CYAN}  │  ${BOLD}Login: admin / ${ADMIN_PASS}${NC}${CYAN}${NC}"
+        else
+            echo -e "${CYAN}  │  ${YELLOW}Login: use web setup (no users yet) or reset admin password (see warnings above).${NC}${CYAN}"
+        fi
     fi
     echo -e "${CYAN}  └──────────────────────────────────────┘${NC}"
     echo ""

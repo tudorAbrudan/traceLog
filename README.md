@@ -32,7 +32,9 @@ The same installer works on every supported server (Linux/macOS, `amd64` / `arm6
 curl -sSL https://raw.githubusercontent.com/tudorAbrudan/tracelog/main/scripts/install.sh | bash
 ```
 
-On Linux this also creates the `tracelog` user, `/var/lib/tracelog`, `/etc/tracelog/config.yaml`, and a **systemd** service on port **8090**. Open `http://your-server:8090` and log in (installer prints the initial `admin` password when it can).
+On Linux the installer sets up **production-style** defaults: **nginx** proxies **HTTP (80)** to TraceLog on **127.0.0.1:8090** (port 8090 is not exposed publicly). Open **`http://your-server-ip/`** and log in (installer prints the initial `admin` password when it can). For **HTTPS**, point DNS at the host and run with `TRACELOG_DOMAIN=your.domain` and `TRACELOG_LETSENCRYPT_EMAIL=you@example.com` so **certbot** can obtain a certificate. To skip nginx and bind on all interfaces like a dev setup: `TRACELOG_NO_PROXY=1`.
+
+To serve TraceLog under a **path** on an existing site (e.g. **`https://example.com/tracelog/`**), run with **`TRACELOG_URL_PREFIX=/tracelog`**, then add **`include /etc/nginx/snippets/tracelog-subpath-loc.conf;`** inside your site’s `server { }` as printed by the installer. Remote agents use hub URL **`https://example.com/tracelog`**.
 
 Use `sudo bash` if the script asks for privilege escalation (it uses `sudo` internally for system paths).
 
@@ -223,6 +225,23 @@ Workflow [`.github/workflows/release.yml`](.github/workflows/release.yml) runs o
 After the first release, **`install.sh`** can download the tarball (no Go on the server). The Go module path stays `github.com/tudorAbrudan/tracelog`; the **GitHub repo** name used for releases is **`traceLog`**.
 
 **Local release (optional):** install [goreleaser](https://goreleaser.com/install/), set `GITHUB_TOKEN`, then `goreleaser release --clean`.
+
+### Login after install (admin password)
+
+The installer prints **`Login: admin / <password>`** when it can run `tracelog user create` against the same database as the service. The systemd unit sets **`Environment=TRACELOG_DATA_DIR=/var/lib/tracelog`** so the hub and CLI use **`/var/lib/tracelog/tracelog.db`**.
+
+If no password appeared:
+
+1. Open the URL in the browser — if there are no users yet, use the **first-time setup** flow.
+2. Or set a new password (as root):
+
+   ```bash
+   sudo -u tracelog env TRACELOG_DATA_DIR=/var/lib/tracelog /usr/local/bin/tracelog user reset-password admin
+   ```
+
+3. List users: `sudo -u tracelog env TRACELOG_DATA_DIR=/var/lib/tracelog /usr/local/bin/tracelog user list`
+
+After upgrading from an older install, reload systemd if you added `TRACELOG_DATA_DIR`: `sudo systemctl daemon-reload && sudo systemctl restart tracelog`.
 
 ### One binary vs “one installer”
 

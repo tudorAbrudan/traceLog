@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"bytes"
 	"embed"
 	"io/fs"
 	"net/http"
@@ -10,30 +11,48 @@ import (
 //go:embed dist
 var distFS embed.FS
 
-func spaHandler() http.Handler {
+var indexPlaceholder = []byte("__TRACELOG_URL_PREFIX__")
+
+// NewSPAHandler serves the embedded dashboard; urlPathPrefix is "" or "/tracelog" (normalized).
+func NewSPAHandler(urlPathPrefix string) http.Handler {
 	sub, err := fs.Sub(distFS, "dist")
 	if err != nil {
 		panic("embedded dist not found: " + err.Error())
 	}
 
+	rawIndex, err := fs.ReadFile(sub, "index.html")
+	if err != nil {
+		panic("embedded index.html: " + err.Error())
+	}
+
+	replacement := []byte(urlPathPrefix)
 	fileServer := http.FileServer(http.FS(sub))
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
-		if path == "/" {
-			path = "index.html"
-		} else {
-			path = strings.TrimPrefix(path, "/")
+		rel := strings.TrimPrefix(path, "/")
+		if rel == "" {
+			rel = "index.html"
 		}
 
-		// Try to serve the static file
-		if _, err := fs.Stat(sub, path); err == nil {
-			fileServer.ServeHTTP(w, r)
+		if rel != "index.html" {
+			if _, statErr := fs.Stat(sub, rel); statErr == nil {
+				fileServer.ServeHTTP(w, r)
+				return
+			}
+		} else {
+			// Explicit / or /index.html
+			serveIndex(w, rawIndex, replacement)
 			return
 		}
 
-		// SPA fallback: serve index.html for all unmatched routes
-		r.URL.Path = "/"
-		fileServer.ServeHTTP(w, r)
+		// SPA fallback: no such static file
+		serveIndex(w, rawIndex, replacement)
 	})
+}
+
+func serveIndex(w http.ResponseWriter, rawIndex, replacement []byte) {
+	body := bytes.ReplaceAll(rawIndex, indexPlaceholder, replacement)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(body)
 }

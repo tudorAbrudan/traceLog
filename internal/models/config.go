@@ -15,6 +15,9 @@ type Config struct {
 	Version     string `yaml:"-"`
 	// MetricsToken, if set, protects GET /metrics (Bearer token or ?token=). Also TRACELOG_METRICS_TOKEN.
 	MetricsToken string `yaml:"metrics_token,omitempty"`
+	// URLPathPrefix is the public path when behind a reverse proxy (e.g. /tracelog). Cookies use this Path.
+	// Flag --url-prefix, env TRACELOG_URL_PREFIX, yaml url_path_prefix.
+	URLPathPrefix string `yaml:"url_path_prefix,omitempty"`
 
 	Collect CollectConfig `yaml:"collect"`
 }
