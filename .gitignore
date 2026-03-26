@@ -13,6 +13,8 @@
 web/node_modules/
 web/dist/
 web/.svelte-kit/
+# Vite build output embedded by Go (hashed filenames change every build — do not commit)
+internal/hub/dist/
 
 # Root (VitePress docs CI)
 /node_modules/

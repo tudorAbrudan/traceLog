@@ -233,6 +233,8 @@ All endpoints require authentication (session cookie) except `/api/health` and `
 
 ## Development
 
+The dashboard is embedded from **`internal/hub/dist/`**, which is **generated** by Vite (`npm run build` in `web/`) and **not committed**. Run `make web-build` (or `make build`) before `go build` / `go test` so `//go:embed dist` is satisfied.
+
 ```bash
 # Start the Go backend
 make dev

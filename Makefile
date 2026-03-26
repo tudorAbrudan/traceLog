@@ -24,15 +24,15 @@ web-build:
 web-dev:
 	cd web && npm run dev
 
-## lint: Run linters
-lint:
+## lint: Run linters (web-build required: hub uses go:embed dist)
+lint: web-build
 	golangci-lint run ./...
 	@if [ -f web/package.json ]; then \
 		cd web && npx eslint . ; \
 	fi
 
-## test: Run all tests
-test:
+## test: Run all tests (web-build required: hub uses go:embed dist)
+test: web-build
 	go test -race -count=1 ./...
 	@if [ -f web/package.json ]; then \
 		cd web && npx vitest run; \
@@ -51,6 +51,7 @@ clean:
 	rm -f $(BINARY)
 	rm -rf dist/
 	rm -rf web/dist/
+	rm -rf internal/hub/dist/
 
 ## help: Show this help
 help:

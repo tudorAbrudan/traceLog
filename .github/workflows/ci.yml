@@ -15,6 +15,11 @@ jobs:
         with:
           go-version: "1.26.1"
           cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Build frontend (go:embed)
+        run: make web-build
       # Prebuilt golangci-lint releases are built with an older Go and refuse go.mod > that version.
       # Building from source with the same toolchain as the project fixes "targeted Go version" errors.
       - name: Install golangci-lint
@@ -30,6 +35,11 @@ jobs:
         with:
           go-version: "1.26.1"
           cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Build frontend (go:embed)
+        run: make web-build
       - run: go test -race -coverprofile=coverage.out ./...
       - uses: actions/upload-artifact@v4
         with:

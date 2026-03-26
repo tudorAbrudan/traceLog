@@ -4,6 +4,10 @@ All notable changes to TraceLog are documented here. The format is loosely based
 
 ## [Unreleased]
 
+### Fixed
+
+- **Release / GoReleaser:** stop committing `internal/hub/dist/` (Vite output changes every build and made the GitHub Actions tree dirty). CI runs `make web-build` before `go test` and lint.
+
 ### Added
 
 - **HTTP Analytics**: unique IP count, top method+path, top IPs/paths (configurable depth), IP blacklist (exact IP + CIDR) for highlighting and estimated hit counts, bad requests (4xx/5xx) per IP and drill-down lines, external WHOIS/ipinfo links.

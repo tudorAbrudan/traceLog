@@ -2,7 +2,8 @@ version: 2
 project_name: tracelog
 
 # Frontend must be built before GoReleaser embeds it. CI runs `npm run build` in web/ first.
-# For local: `make web-build` or `cd web && npm run build` before `goreleaser release`.
+# `internal/hub/dist/` is gitignored (hashed asset names change each build); do not commit it.
+# Local: `make web-build` or `cd web && npm run build` before `goreleaser release` / `go build`.
 
 builds:
   - id: tracelog
