@@ -46,6 +46,19 @@ type LogEntry struct {
 	Metadata string    `json:"metadata,omitempty"`
 }
 
+type ProcessMetrics struct {
+	ServerID string    `json:"server_id"`
+	Ts       time.Time `json:"ts"`
+	PID      int32     `json:"pid"`
+	Name     string    `json:"name"`
+	Cmdline  string    `json:"cmdline"`
+	Status   string    `json:"status"`
+	CPU      float64   `json:"cpu_percent"`
+	MemRSS   uint64    `json:"mem_rss"`
+	MemVMS   uint64    `json:"mem_vms"`
+	Threads  int32     `json:"threads"`
+}
+
 type AccessLogEntry struct {
 	ServerID   string    `json:"server_id"`
 	Ts         time.Time `json:"ts"`

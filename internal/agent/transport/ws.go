@@ -106,6 +106,22 @@ func (t *WSTransport) SendDockerMetrics(ctx context.Context, metrics []models.Do
 	return t.send(ctx, Message{Type: "docker_metrics", Data: data})
 }
 
+func (t *WSTransport) SendProcessMetrics(ctx context.Context, metrics []models.ProcessMetrics) error {
+	data, err := json.Marshal(metrics)
+	if err != nil {
+		return err
+	}
+	return t.send(ctx, Message{Type: "process_metrics", Data: data})
+}
+
+func (t *WSTransport) SendAccessLog(ctx context.Context, entry *models.AccessLogEntry) error {
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return err
+	}
+	return t.send(ctx, Message{Type: "access_log", Data: data})
+}
+
 func (t *WSTransport) SendLog(ctx context.Context, entry *models.LogEntry) error {
 	data, err := json.Marshal(entry)
 	if err != nil {

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,14 +15,16 @@ import (
 )
 
 type LogCallback func(entry *models.LogEntry)
+type AccessLogCallback func(entry *models.AccessLogEntry)
 
 type LogCollector struct {
-	sources []models.LogSource
-	cb      LogCallback
+	sources    []models.LogSource
+	cb         LogCallback
+	accessCb   AccessLogCallback
 }
 
-func NewLogCollector(sources []models.LogSource, cb LogCallback) *LogCollector {
-	return &LogCollector{sources: sources, cb: cb}
+func NewLogCollector(sources []models.LogSource, cb LogCallback, accessCb AccessLogCallback) *LogCollector {
+	return &LogCollector{sources: sources, cb: cb, accessCb: accessCb}
 }
 
 func (lc *LogCollector) Start(ctx context.Context) {
@@ -58,6 +61,11 @@ func (lc *LogCollector) tailFile(ctx context.Context, src models.LogSource) {
 				if entry != nil {
 					lc.cb(entry)
 				}
+				if src.Format == "nginx" && lc.accessCb != nil {
+					if alog := parseNginxAccessLog(src, line); alog != nil {
+						lc.accessCb(alog)
+					}
+				}
 			} else {
 				time.Sleep(250 * time.Millisecond)
 				// Reset scanner after EOF
@@ -70,6 +78,24 @@ func (lc *LogCollector) tailFile(ctx context.Context, src models.LogSource) {
 var nginxLogRegex = regexp.MustCompile(
 	`^(\S+)\s+-\s+\S+\s+\[([^\]]+)]\s+"(\S+)\s+(\S+)\s+\S+"\s+(\d+)\s+(\d+)\s+"[^"]*"\s+"([^"]*)"`,
 )
+
+func parseNginxAccessLog(src models.LogSource, line string) *models.AccessLogEntry {
+	matches := nginxLogRegex.FindStringSubmatch(line)
+	if matches == nil {
+		return nil
+	}
+	statusCode, _ := strconv.Atoi(matches[5])
+	bytesSent, _ := strconv.ParseUint(matches[6], 10, 64)
+	return &models.AccessLogEntry{
+		Ts:         time.Now().UTC(),
+		Method:     matches[3],
+		Path:       matches[4],
+		StatusCode: statusCode,
+		IP:         matches[1],
+		UserAgent:  matches[7],
+		BytesSent:  bytesSent,
+	}
+}
 
 func parseLine(src models.LogSource, line string) *models.LogEntry {
 	if strings.TrimSpace(line) == "" {

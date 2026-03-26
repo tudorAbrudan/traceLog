@@ -12,15 +12,17 @@ type Config struct {
 	DataDir     string `yaml:"data_dir"`
 	HubURL      string `yaml:"hub_url"`
 	APIKey      string `yaml:"api_key"`
+	Version     string `yaml:"-"`
 
 	Collect CollectConfig `yaml:"collect"`
 }
 
 type CollectConfig struct {
-	IntervalSeconds int          `yaml:"interval_seconds"`
-	System          bool         `yaml:"system"`
-	Docker          bool         `yaml:"docker"`
-	LogSources      []LogSource  `yaml:"logs"`
+	IntervalSeconds int         `yaml:"interval_seconds"`
+	System          bool        `yaml:"system"`
+	Docker          bool        `yaml:"docker"`
+	Processes       bool        `yaml:"processes"`
+	LogSources      []LogSource `yaml:"logs"`
 }
 
 type LogSource struct {
@@ -48,6 +50,7 @@ func DefaultConfig() *Config {
 			IntervalSeconds: 10,
 			System:          true,
 			Docker:          true,
+			Processes:       true,
 		},
 	}
 }

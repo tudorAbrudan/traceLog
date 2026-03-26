@@ -83,6 +83,14 @@ func (h *Hub) IngestDockerMetrics(ctx context.Context, metrics []models.DockerMe
 	return nil
 }
 
+func (h *Hub) IngestProcessMetrics(ctx context.Context, metrics []models.ProcessMetrics) error {
+	return h.store.InsertProcessMetrics(ctx, metrics)
+}
+
+func (h *Hub) IngestAccessLog(ctx context.Context, entry *models.AccessLogEntry) error {
+	return h.store.InsertAccessLog(ctx, entry)
+}
+
 func (h *Hub) IngestLog(ctx context.Context, entry *models.LogEntry) error {
 	return h.store.InsertLog(ctx, entry)
 }
@@ -202,6 +210,7 @@ func (h *Hub) registerRoutes() {
 	// Public routes
 	h.mux.HandleFunc("GET /api/health", h.handleHealth)
 	h.mux.HandleFunc("POST /api/auth/login", h.handleLogin)
+	h.mux.HandleFunc("POST /api/auth/setup", h.handleSetup)
 
 	// Protected routes (require session)
 	h.mux.HandleFunc("POST /api/auth/logout", auth(h.handleLogout))
@@ -212,6 +221,7 @@ func (h *Hub) registerRoutes() {
 	h.mux.HandleFunc("GET /api/servers/{id}", auth(h.handleGetServer))
 	h.mux.HandleFunc("GET /api/servers/{id}/metrics", auth(h.handleGetMetrics))
 	h.mux.HandleFunc("GET /api/servers/{id}/docker", auth(h.handleGetDockerMetrics))
+	h.mux.HandleFunc("GET /api/servers/{id}/processes", auth(h.handleGetProcesses))
 	h.mux.HandleFunc("POST /api/servers", auth(csrf(h.handleCreateServer)))
 	h.mux.HandleFunc("DELETE /api/servers/{id}", auth(csrf(h.handleDeleteServer)))
 
@@ -226,6 +236,10 @@ func (h *Hub) registerRoutes() {
 
 	// Logs
 	h.mux.HandleFunc("GET /api/logs", auth(h.handleGetLogs))
+
+	// Access Logs / HTTP Analytics
+	h.mux.HandleFunc("GET /api/servers/{id}/access-stats", auth(h.handleAccessLogStats))
+	h.mux.HandleFunc("GET /api/servers/{id}/access-logs", auth(h.handleRecentAccessLogs))
 
 	// Uptime checks
 	h.mux.HandleFunc("GET /api/uptime", auth(h.handleListUptimeChecks))

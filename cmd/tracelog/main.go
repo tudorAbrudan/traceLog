@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	osexec "os/exec"
+	"time"
 
 	"github.com/tudorAbrudan/tracelog/internal/agent"
 	"github.com/tudorAbrudan/tracelog/internal/hub"
@@ -81,6 +83,7 @@ Run 'tracelog <command> --help' for details on a specific command.
 func cmdServe() {
 	cfg := models.DefaultConfig()
 	cfg.Mode = "serve"
+	cfg.Version = version
 	parseServeFlags(cfg)
 
 	h, err := hub.New(cfg)
@@ -102,6 +105,7 @@ func cmdServe() {
 func cmdHub() {
 	cfg := models.DefaultConfig()
 	cfg.Mode = "hub"
+	cfg.Version = version
 	parseHubFlags(cfg)
 
 	h, err := hub.New(cfg)
@@ -232,40 +236,32 @@ func cmdStatus() {
 func cmdBackup() {
 	cfg := models.DefaultConfig()
 	src := cfg.DataDir + "/tracelog.db"
-	dst := cfg.DataDir + "/backups/tracelog_" + fmt.Sprintf("%d", os.Getpid()) + ".db"
 
 	if _, err := os.Stat(src); os.IsNotExist(err) {
 		fatal("Database not found at %s", src)
 	}
 
-	if err := os.MkdirAll(cfg.DataDir+"/backups", 0750); err != nil {
+	s, err := store.New(cfg.DataDir)
+	if err != nil {
+		fatal("Failed to open database: %v", err)
+	}
+
+	ts := time.Now().Format("20060102_150405")
+	backupDir := cfg.DataDir + "/backups"
+	if err := os.MkdirAll(backupDir, 0750); err != nil {
 		fatal("Cannot create backup dir: %v", err)
 	}
 
-	srcFile, err := os.Open(src)
-	if err != nil {
-		fatal("Cannot open database: %v", err)
+	dst := backupDir + "/tracelog_" + ts + ".db"
+	if err := s.Backup(context.Background(), dst); err != nil {
+		s.Close()
+		fatal("Backup failed: %v", err)
 	}
-	defer srcFile.Close()
+	s.Close()
 
-	dstFile, err := os.Create(dst)
-	if err != nil {
-		fatal("Cannot create backup: %v", err)
-	}
-	defer dstFile.Close()
-
-	buf := make([]byte, 1024*1024)
-	for {
-		n, err := srcFile.Read(buf)
-		if n > 0 {
-			dstFile.Write(buf[:n])
-		}
-		if err != nil {
-			break
-		}
-	}
-
-	fmt.Printf("Backup created: %s\n", dst)
+	info, _ := os.Stat(dst)
+	sizeMB := float64(info.Size()) / (1024 * 1024)
+	fmt.Printf("Backup created: %s (%.1f MB)\n", dst, sizeMB)
 }
 
 func cmdRestore() {
@@ -317,29 +313,67 @@ func cmdInstall() {
 }
 
 func cmdUninstall() {
-	fmt.Println("To uninstall TraceLog:")
-	fmt.Println()
-	fmt.Println("  1. Stop the service:")
-	fmt.Println("     sudo systemctl stop tracelog")
-	fmt.Println("     sudo systemctl disable tracelog")
-	fmt.Println()
-	fmt.Println("  2. Remove files:")
-	fmt.Println("     sudo rm /etc/systemd/system/tracelog.service")
-	fmt.Println("     sudo rm /usr/local/bin/tracelog")
-	fmt.Println("     sudo rm -rf /var/lib/tracelog")
-	fmt.Println("     sudo rm -rf /etc/tracelog")
-	fmt.Println()
-	fmt.Println("  3. Remove user (optional):")
-	fmt.Println("     sudo userdel tracelog")
+	if os.Getuid() != 0 {
+		fmt.Println("Uninstall requires root. Run:")
+		fmt.Println("  sudo tracelog uninstall")
+		fmt.Println()
+		fmt.Println("Or manually:")
+		fmt.Println("  sudo systemctl stop tracelog && sudo systemctl disable tracelog")
+		fmt.Println("  sudo rm /etc/systemd/system/tracelog.service")
+		fmt.Println("  sudo rm /usr/local/bin/tracelog")
+		fmt.Println("  sudo rm -rf /var/lib/tracelog")
+		return
+	}
+
+	fmt.Printf("TraceLog %s - Uninstaller\n\n", version)
+
+	// Stop service
+	fmt.Print("Stopping service... ")
+	exec("systemctl", "stop", "tracelog")
+	exec("systemctl", "disable", "tracelog")
+	fmt.Println("done")
+
+	// Remove systemd unit
+	os.Remove("/etc/systemd/system/tracelog.service")
+	exec("systemctl", "daemon-reload")
+	fmt.Println("Removed systemd service")
+
+	// Ask about data
+	fmt.Print("\nDelete all data (/var/lib/tracelog)? [y/N] ")
+	var answer string
+	fmt.Scanln(&answer)
+	if answer == "y" || answer == "Y" {
+		os.RemoveAll("/var/lib/tracelog")
+		fmt.Println("Data deleted")
+	} else {
+		fmt.Println("Data kept at /var/lib/tracelog")
+	}
+
+	// Remove binary
+	selfPath, _ := os.Executable()
+	os.Remove(selfPath)
+	fmt.Println("Binary removed")
+
+	fmt.Println("\nTraceLog uninstalled successfully.")
 }
 
 func cmdUpgrade() {
 	fmt.Printf("Current version: %s\n", version)
-	fmt.Println("To upgrade, download the latest release:")
+	fmt.Println("Checking for updates...")
+
+	fmt.Println()
+	fmt.Println("To upgrade, run the install script:")
 	fmt.Println("  curl -sSL https://raw.githubusercontent.com/tudorAbrudan/tracelog/main/scripts/install.sh | bash")
 	fmt.Println()
 	fmt.Println("Or build from source:")
 	fmt.Println("  git pull && make build")
+	fmt.Println()
+	fmt.Println("The installer will automatically stop the service, replace the binary, run database migrations, and restart.")
+}
+
+func exec(name string, args ...string) {
+	cmd := osexec.Command(name, args...)
+	cmd.Run()
 }
 
 func fatal(format string, args ...any) {

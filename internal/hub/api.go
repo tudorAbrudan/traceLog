@@ -16,10 +16,13 @@ import (
 // --- Health ---
 
 func (h *Hub) handleHealth(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	userCount, _ := h.store.UserCount(ctx)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":  "ok",
-		"version": "dev",
-		"uptime":  time.Now().Unix(),
+		"status":     "ok",
+		"version":    h.cfg.Version,
+		"uptime":     time.Now().Unix(),
+		"setup_done": userCount > 0,
 	})
 }
 
@@ -112,6 +115,38 @@ func (h *Hub) handleGetDockerMetrics(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, metrics)
 }
 
+// --- Processes ---
+
+func (h *Hub) handleGetProcesses(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	latest := r.URL.Query().Get("latest")
+	if latest == "true" {
+		procs, err := h.store.GetLatestProcesses(r.Context(), id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Failed to query processes")
+			return
+		}
+		writeJSON(w, http.StatusOK, procs)
+		return
+	}
+
+	rangeStr := r.URL.Query().Get("range")
+	if rangeStr == "" {
+		rangeStr = "1h"
+	}
+	duration, err := parseRange(rangeStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid range")
+		return
+	}
+	procs, err := h.store.GetProcessMetrics(r.Context(), id, time.Now().Add(-duration))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to query processes")
+		return
+	}
+	writeJSON(w, http.StatusOK, procs)
+}
+
 // --- Logs ---
 
 func (h *Hub) handleGetLogs(w http.ResponseWriter, r *http.Request) {
@@ -134,6 +169,37 @@ func (h *Hub) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 	logs, err := h.store.QueryLogs(r.Context(), serverID, opts)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to query logs")
+		return
+	}
+	writeJSON(w, http.StatusOK, logs)
+}
+
+// --- Access Logs / HTTP Analytics ---
+
+func (h *Hub) handleAccessLogStats(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	rangeStr := r.URL.Query().Get("range")
+	if rangeStr == "" {
+		rangeStr = "24h"
+	}
+	d, err := parseRange(rangeStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid range")
+		return
+	}
+	stats, err := h.store.GetAccessLogStats(r.Context(), id, time.Now().Add(-d))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to get access stats")
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
+}
+
+func (h *Hub) handleRecentAccessLogs(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	logs, err := h.store.GetRecentAccessLogs(r.Context(), id, 200)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to get access logs")
 		return
 	}
 	writeJSON(w, http.StatusOK, logs)

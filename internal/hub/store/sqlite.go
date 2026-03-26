@@ -68,6 +68,7 @@ func (s *Store) migrate() error {
 
 	migrations := []string{
 		migration001,
+		migration002,
 	}
 
 	for i := currentVersion; i < len(migrations); i++ {
@@ -231,6 +232,30 @@ INSERT OR IGNORE INTO settings (key, value) VALUES ('retention_days', '30');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('collection_interval', '10');
 `
 
+const migration002 = `
+CREATE TABLE IF NOT EXISTS process_metrics (
+    server_id TEXT NOT NULL,
+    ts DATETIME NOT NULL,
+    pid INTEGER NOT NULL,
+    name TEXT,
+    cmdline TEXT,
+    status TEXT,
+    cpu_percent REAL,
+    mem_rss INTEGER,
+    mem_vms INTEGER,
+    threads INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_process_metrics_server_ts ON process_metrics(server_id, ts);
+`
+
+func (s *Store) Backup(ctx context.Context, destPath string) error {
+	_, err := s.db.ExecContext(ctx, fmt.Sprintf("VACUUM INTO '%s'", destPath))
+	if err != nil {
+		return fmt.Errorf("backup database: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) StartRetentionWorker(ctx context.Context) {
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
@@ -255,7 +280,7 @@ func (s *Store) runRetention() {
 	}
 
 	cutoff := time.Now().AddDate(0, 0, -days).Format(time.RFC3339)
-	tables := []string{"metrics", "docker_metrics", "logs", "access_logs", "uptime_results", "alert_history"}
+	tables := []string{"metrics", "docker_metrics", "logs", "access_logs", "uptime_results", "alert_history", "process_metrics"}
 
 	for _, table := range tables {
 		tsCol := "ts"

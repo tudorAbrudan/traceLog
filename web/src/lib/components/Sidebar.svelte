@@ -1,10 +1,21 @@
 <script lang="ts">
-  import { currentPage, user } from '../store';
+  import { currentPage, user, darkMode } from '../store';
   import { api } from '../api';
+
+  function toggleTheme() {
+    darkMode.update(d => {
+      const next = !d;
+      document.documentElement.setAttribute('data-theme', next ? 'dark' : 'light');
+      localStorage.setItem('tracelog-theme', next ? 'dark' : 'light');
+      return next;
+    });
+  }
 
   const navItems = [
     { id: 'overview', label: 'Overview', icon: '◉' },
+    { id: 'processes', label: 'Processes', icon: '⊞' },
     { id: 'logs', label: 'Logs', icon: '☰' },
+    { id: 'http', label: 'HTTP Analytics', icon: '⇄' },
     { id: 'uptime', label: 'Uptime', icon: '↑' },
     { id: 'settings', label: 'Settings', icon: '⚙' },
   ];
@@ -38,6 +49,9 @@
     <div class="user-info">
       <span class="user-avatar">{$user?.username?.charAt(0).toUpperCase()}</span>
       <span class="username">{$user?.username}</span>
+      <button class="theme-toggle" on:click={toggleTheme} title="Toggle theme">
+        {$darkMode ? '☀' : '◑'}
+      </button>
     </div>
     <button class="logout" on:click={handleLogout}>Sign out</button>
   </div>
@@ -116,7 +130,13 @@
     font-size: 0.75rem;
     font-weight: 700;
   }
-  .username { font-size: 0.8rem; color: var(--text-primary); }
+  .username { font-size: 0.8rem; color: var(--text-primary); flex: 1; }
+  .theme-toggle {
+    background: none; border: 1px solid var(--border); color: var(--text-muted);
+    border-radius: 6px; width: 28px; height: 28px; cursor: pointer; font-size: 0.9rem;
+    display: flex; align-items: center; justify-content: center; transition: all 0.15s;
+  }
+  .theme-toggle:hover { background: var(--bg-hover); color: var(--text-primary); }
   .logout {
     width: 100%;
     padding: 0.4rem;

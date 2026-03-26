@@ -4,16 +4,29 @@
   import { user, isAuthenticated, currentPage } from './lib/store';
 
   import Login from './lib/pages/Login.svelte';
+  import SetupWizard from './lib/pages/SetupWizard.svelte';
   import Overview from './lib/pages/Overview.svelte';
   import ServerDetail from './lib/pages/ServerDetail.svelte';
   import Logs from './lib/pages/Logs.svelte';
   import Uptime from './lib/pages/Uptime.svelte';
   import Settings from './lib/pages/Settings.svelte';
+  import Processes from './lib/pages/Processes.svelte';
+  import HttpAnalytics from './lib/pages/HttpAnalytics.svelte';
   import Sidebar from './lib/components/Sidebar.svelte';
 
   let checking = true;
+  let needsSetup = false;
 
   onMount(async () => {
+    try {
+      const health = await api.health();
+      if (!health.setup_done) {
+        needsSetup = true;
+        checking = false;
+        return;
+      }
+    } catch {}
+
     try {
       const res = await api.me();
       if (res.user) {
@@ -37,6 +50,8 @@
   <div class="loading-screen">
     <div class="spinner"></div>
   </div>
+{:else if needsSetup}
+  <SetupWizard />
 {:else if !$isAuthenticated}
   <Login />
 {:else}
@@ -49,6 +64,10 @@
         <ServerDetail serverId={getServerId($currentPage)} />
       {:else if $currentPage === 'logs'}
         <Logs />
+      {:else if $currentPage === 'processes'}
+        <Processes />
+      {:else if $currentPage === 'http'}
+        <HttpAnalytics />
       {:else if $currentPage === 'uptime'}
         <Uptime />
       {:else if $currentPage === 'settings'}

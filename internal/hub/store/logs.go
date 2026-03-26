@@ -75,12 +75,3 @@ type LogQueryOpts struct {
 	Limit  int
 }
 
-func (s *Store) InsertAccessLog(ctx context.Context, entry *models.AccessLogEntry) error {
-	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO access_logs (server_id, ts, method, path, status_code, duration_ms, ip, user_agent, bytes_sent)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		entry.ServerID, entry.Ts.UTC().Format(time.RFC3339), entry.Method, entry.Path,
-		entry.StatusCode, entry.DurationMs, entry.IP, entry.UserAgent, entry.BytesSent,
-	)
-	return err
-}

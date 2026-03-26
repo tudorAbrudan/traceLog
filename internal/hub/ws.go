@@ -117,6 +117,30 @@ func (h *Hub) processAgentMessage(ctx context.Context, serverID string, msg *wsM
 			}
 		}
 
+	case "process_metrics":
+		var metrics []models.ProcessMetrics
+		if err := json.Unmarshal(msg.Data, &metrics); err != nil {
+			slog.Warn("Invalid process metrics", "error", err)
+			return
+		}
+		for i := range metrics {
+			metrics[i].ServerID = serverID
+		}
+		if err := h.store.InsertProcessMetrics(ctx, metrics); err != nil {
+			slog.Error("Failed to store process metrics", "error", err)
+		}
+
+	case "access_log":
+		var entry models.AccessLogEntry
+		if err := json.Unmarshal(msg.Data, &entry); err != nil {
+			slog.Warn("Invalid access log entry", "error", err)
+			return
+		}
+		entry.ServerID = serverID
+		if err := h.store.InsertAccessLog(ctx, &entry); err != nil {
+			slog.Error("Failed to store access log entry", "error", err)
+		}
+
 	case "log":
 		var entry models.LogEntry
 		if err := json.Unmarshal(msg.Data, &entry); err != nil {

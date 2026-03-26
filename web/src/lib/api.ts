@@ -24,6 +24,7 @@ export const api = {
   setCsrfToken(token: string) { csrfToken = token; },
 
   // Auth
+  setup: (username: string, password: string) => request('POST', '/auth/setup', { username, password }),
   login: (username: string, password: string) => request('POST', '/auth/login', { username, password }),
   logout: () => request('POST', '/auth/logout'),
   me: () => request('GET', '/auth/me'),
@@ -71,6 +72,14 @@ export const api = {
   createNotificationChannel: (data: any) => request('POST', '/notifications', data),
   deleteNotificationChannel: (id: string) => request('DELETE', `/notifications/${id}`),
   testNotificationChannel: (id: string) => request('POST', `/notifications/${id}/test`),
+
+  // Processes
+  getProcesses: (id: string, latest = false) => request('GET', `/servers/${id}/processes?latest=${latest}`),
+  getProcessHistory: (id: string, range_: string = '1h') => request('GET', `/servers/${id}/processes?range=${range_}`),
+
+  // Access Logs / HTTP Analytics
+  getAccessStats: (id: string, range_: string = '24h') => request('GET', `/servers/${id}/access-stats?range=${range_}`),
+  getRecentAccessLogs: (id: string) => request('GET', `/servers/${id}/access-logs`),
 
   // Detection
   detect: () => request('GET', '/detect'),

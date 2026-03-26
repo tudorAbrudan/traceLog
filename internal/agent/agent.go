@@ -14,7 +14,9 @@ import (
 type Transport interface {
 	SendMetrics(ctx context.Context, m *models.SystemMetrics) error
 	SendDockerMetrics(ctx context.Context, metrics []models.DockerMetrics) error
+	SendProcessMetrics(ctx context.Context, metrics []models.ProcessMetrics) error
 	SendLog(ctx context.Context, entry *models.LogEntry) error
+	SendAccessLog(ctx context.Context, entry *models.AccessLogEntry) error
 	Close() error
 }
 
@@ -28,6 +30,14 @@ func (t *localTransport) SendMetrics(ctx context.Context, m *models.SystemMetric
 
 func (t *localTransport) SendDockerMetrics(ctx context.Context, metrics []models.DockerMetrics) error {
 	return t.hub.IngestDockerMetrics(ctx, metrics)
+}
+
+func (t *localTransport) SendProcessMetrics(ctx context.Context, metrics []models.ProcessMetrics) error {
+	return t.hub.IngestProcessMetrics(ctx, metrics)
+}
+
+func (t *localTransport) SendAccessLog(ctx context.Context, entry *models.AccessLogEntry) error {
+	return t.hub.IngestAccessLog(ctx, entry)
 }
 
 func (t *localTransport) SendLog(ctx context.Context, entry *models.LogEntry) error {
@@ -74,6 +84,14 @@ func (w *wsTransportAdapter) SendDockerMetrics(ctx context.Context, metrics []mo
 	return w.wt.SendDockerMetrics(ctx, metrics)
 }
 
+func (w *wsTransportAdapter) SendProcessMetrics(ctx context.Context, metrics []models.ProcessMetrics) error {
+	return w.wt.SendProcessMetrics(ctx, metrics)
+}
+
+func (w *wsTransportAdapter) SendAccessLog(ctx context.Context, entry *models.AccessLogEntry) error {
+	return w.wt.SendAccessLog(ctx, entry)
+}
+
 func (w *wsTransportAdapter) SendLog(ctx context.Context, entry *models.LogEntry) error {
 	return w.wt.SendLog(ctx, entry)
 }
@@ -87,6 +105,7 @@ type Agent struct {
 	transport   Transport
 	system      *collector.SystemCollector
 	docker      *collector.DockerCollector
+	process     *collector.ProcessCollector
 	logs        *collector.LogCollector
 	wsTransport *transport.WSTransport
 	serverID    string
@@ -109,6 +128,10 @@ func New(cfg *models.Config, opts ...Option) (*Agent, error) {
 
 	if cfg.Collect.Docker {
 		a.docker = collector.NewDockerCollector()
+	}
+
+	if cfg.Collect.Processes {
+		a.process = collector.NewProcessCollector()
 	}
 
 	return a, nil
@@ -141,6 +164,11 @@ func (a *Agent) Start(ctx context.Context) error {
 			entry.ServerID = a.serverID
 			if err := a.transport.SendLog(ctx, entry); err != nil {
 				slog.Debug("Failed to send log entry", "error", err)
+			}
+		}, func(entry *models.AccessLogEntry) {
+			entry.ServerID = a.serverID
+			if err := a.transport.SendAccessLog(ctx, entry); err != nil {
+				slog.Debug("Failed to send access log entry", "error", err)
 			}
 		})
 		a.logs.Start(ctx)
@@ -186,6 +214,20 @@ func (a *Agent) collectAndSend(ctx context.Context) {
 			}
 			if err := a.transport.SendDockerMetrics(ctx, metrics); err != nil {
 				slog.Error("Failed to send docker metrics", "error", err)
+			}
+		}
+	}
+
+	if a.process != nil {
+		metrics, err := a.process.Collect(ctx)
+		if err != nil {
+			slog.Debug("Failed to collect process metrics", "error", err)
+		} else if len(metrics) > 0 {
+			for i := range metrics {
+				metrics[i].ServerID = a.serverID
+			}
+			if err := a.transport.SendProcessMetrics(ctx, metrics); err != nil {
+				slog.Error("Failed to send process metrics", "error", err)
 			}
 		}
 	}

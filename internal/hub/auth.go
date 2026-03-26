@@ -221,7 +221,76 @@ func (h *Hub) handleMe(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Not authenticated"})
 		return
 	}
-	writeJSON(w, http.StatusOK, user)
+	csrfCookie, _ := r.Cookie("tracelog_csrf")
+	csrfToken := ""
+	if csrfCookie != nil {
+		csrfToken = csrfCookie.Value
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"user":       user,
+		"csrf_token": csrfToken,
+	})
+}
+
+func (h *Hub) handleSetup(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	count, _ := h.store.UserCount(ctx)
+	if count > 0 {
+		writeError(w, http.StatusForbidden, "Setup already completed")
+		return
+	}
+
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if req.Username == "" || req.Password == "" {
+		writeError(w, http.StatusBadRequest, "Username and password are required")
+		return
+	}
+	if len(req.Password) < 8 {
+		writeError(w, http.StatusBadRequest, "Password must be at least 8 characters")
+		return
+	}
+
+	user, err := h.store.CreateUser(ctx, req.Username, req.Password)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to create user: %v", err)
+		return
+	}
+
+	token := generateToken()
+	expiresAt := time.Now().Add(7 * 24 * time.Hour)
+	h.store.CreateSession(ctx, token, user.ID, expiresAt)
+
+	csrfToken := generateToken()
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "tracelog_session",
+		Value:    token,
+		Path:     "/",
+		Expires:  expiresAt,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+	http.SetCookie(w, &http.Cookie{
+		Name:     "tracelog_csrf",
+		Value:    csrfToken,
+		Path:     "/",
+		Expires:  expiresAt,
+		SameSite: http.SameSiteStrictMode,
+	})
+
+	slog.Info("Setup completed, first user created", "username", req.Username)
+
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"user":       user,
+		"csrf_token": csrfToken,
+	})
 }
 
 func generateToken() string {

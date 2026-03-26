@@ -7,5 +7,8 @@ interface User {
 
 export const user = writable<User | null>(null);
 export const isAuthenticated = writable(false);
-export const darkMode = writable(true);
+
+const savedTheme = typeof localStorage !== 'undefined' ? localStorage.getItem('tracelog-theme') : null;
+export const darkMode = writable(savedTheme !== 'light');
+
 export const currentPage = writable('overview');
