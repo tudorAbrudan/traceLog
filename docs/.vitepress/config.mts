@@ -3,7 +3,8 @@ import { defineConfig } from 'vitepress'
 export default defineConfig({
   title: 'TraceLog',
   description: 'Lightweight server monitoring in a single binary',
-  base: '/tracelog/',
+  // Must match GitHub repo name in Pages URL: …github.io/traceLog/
+  base: '/traceLog/',
 
   themeConfig: {
     logo: undefined,
