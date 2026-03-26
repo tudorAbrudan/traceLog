@@ -1,11 +1,8 @@
 version: 2
 project_name: tracelog
 
-before:
-  hooks:
-    - cmd: make web-build
-      env:
-        - CGO_ENABLED=0
+# Frontend must be built before GoReleaser embeds it. CI runs `npm run build` in web/ first.
+# For local: `make web-build` or `cd web && npm run build` before `goreleaser release`.
 
 builds:
   - id: tracelog
