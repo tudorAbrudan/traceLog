@@ -549,6 +549,32 @@ EOF
     ok "Wrote /etc/nginx/conf.d/tracelog-subpath-map.conf and /etc/nginx/snippets/tracelog-subpath-loc.conf"
 }
 
+# Shown when auto-inject fails or TRACELOG_NGINX_SITE was not set.
+print_nginx_subpath_manual_steps() {
+    echo ""
+    warn "┌─ TraceLog subpath: manual nginx step ─────────────────────────────────"
+    info "│ Find your HTTPS vhost (example for cadourile.ro):"
+    info "│   /etc/nginx/sites-enabled/cadourile.ro"
+    info "│ (discover: sudo grep -r server_name /etc/nginx/sites-enabled/)"
+    info "│"
+    info "│ Inside server { ... } that has listen 443 (ssl) and server_name, add"
+    info "│ after server_name (same indentation as other directives):"
+    info "│"
+    info "│   include /etc/nginx/snippets/tracelog-subpath-loc.conf;"
+    info "│"
+    info "│ Example:"
+    info "│   server {"
+    info "│       server_name cadourile.ro www.cadourile.ro;"
+    info "│       include /etc/nginx/snippets/tracelog-subpath-loc.conf;"
+    info "│       ..."
+    info "│   }"
+    info "│"
+    info "│ Then run:"
+    info "│   sudo nginx -t && sudo systemctl reload nginx"
+    warn "└────────────────────────────────────────────────────────────────────────"
+    echo ""
+}
+
 # Insert include into the HTTPS (listen …443) server block matching the site name.
 # $1 = vhost filename (e.g. cadourile.ro) under sites-enabled or sites-available.
 inject_nginx_subpath_include_into_vhost() {
@@ -561,7 +587,9 @@ inject_nginx_subpath_include_into_vhost() {
         fi
     done
     if [ -z "$f" ]; then
-        warn "No nginx vhost file named $site under sites-enabled or sites-available."
+        warn "No nginx vhost file named \"$site\" under sites-enabled or sites-available."
+        print_nginx_subpath_manual_steps
+        info "Create or rename the vhost file to match TRACELOG_NGINX_SITE, or add the include by hand."
         return 1
     fi
 
@@ -607,6 +635,7 @@ inject_nginx_subpath_include_into_vhost() {
         warn "Could not auto-insert include (no listen 443 + server_name matching ${host_label} in $f)."
         rm -f "$tmp"
         sudo rm -f "$bak"
+        print_nginx_subpath_manual_steps
         return 1
     fi
 
@@ -620,6 +649,7 @@ inject_nginx_subpath_include_into_vhost() {
     warn "nginx -t failed after edit; restoring $f from backup"
     sudo mv "$bak" "$f"
     sudo nginx -t || true
+    print_nginx_subpath_manual_steps
     return 1
 }
 
@@ -653,11 +683,11 @@ setup_nginx_subpath_only() {
     fi
 
     if [ "$inject_ok" != 1 ]; then
-        echo ""
-        warn "Add this line inside your HTTPS server { } for your site (after server_name is fine):"
-        info "  include /etc/nginx/snippets/tracelog-subpath-loc.conf;"
-        warn "Or re-run with: TRACELOG_NGINX_SITE=cadourile.ro (vhost filename under sites-enabled)"
-        warn "Then: sudo nginx -t && sudo systemctl reload nginx"
+        if [ -z "${TRACELOG_NGINX_SITE:-}" ]; then
+            warn "TRACELOG_NGINX_SITE was not set — installer did not try to edit your vhost."
+            info "Re-run with: TRACELOG_NGINX_SITE=cadourile.ro   (filename under /etc/nginx/sites-enabled/)"
+        fi
+        print_nginx_subpath_manual_steps
     fi
 }
 

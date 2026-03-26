@@ -34,9 +34,44 @@ curl -sSL https://raw.githubusercontent.com/tudorAbrudan/tracelog/main/scripts/i
 
 On Linux the installer sets up **production-style** defaults: **nginx** proxies **HTTP (80)** to TraceLog on **127.0.0.1:8090** (port 8090 is not exposed publicly). Open **`http://your-server-ip/`** and log in (installer prints the initial `admin` password when it can). For **HTTPS**, point DNS at the host and run with `TRACELOG_DOMAIN=your.domain` and `TRACELOG_LETSENCRYPT_EMAIL=you@example.com` so **certbot** can obtain a certificate. To skip nginx and bind on all interfaces like a dev setup: `TRACELOG_NO_PROXY=1`.
 
-To serve TraceLog under a **path** on an existing site (e.g. **`https://cadourile.ro/tracelog/`**), run with **`TRACELOG_URL_PREFIX=/tracelog`**. Optionally set **`TRACELOG_NGINX_SITE=cadourile.ro`** (vhost filename in `sites-enabled`) so the installer inserts the **`include /etc/nginx/snippets/tracelog-subpath-loc.conf;`** line into your **HTTPS** `server { }` and reloads nginx. Otherwise add that include manually. Remote agents use hub URL **`https://your-domain/tracelog`**.
-
 Use `sudo bash` if the script asks for privilege escalation (it uses `sudo` internally for system paths).
+
+#### HTTPS subpath on an existing site (e.g. cadourile.ro)
+
+One-liner (installer writes snippets under `/etc/nginx/conf.d/` and `/etc/nginx/snippets/`, and **tries** to patch your vhost when **`TRACELOG_NGINX_SITE`** matches the filename in `sites-enabled`):
+
+```bash
+sudo TRACELOG_URL_PREFIX=/tracelog TRACELOG_NGINX_SITE=cadourile.ro bash -s < <(curl -sSL https://raw.githubusercontent.com/tudorAbrudan/tracelog/main/scripts/install.sh)
+```
+
+Optional: **`TRACELOG_PUBLIC_DOMAIN=cadourile.ro`** if the banner should show a hostname different from the vhost filename.
+
+**If the installer cannot edit nginx** (unusual vhost layout, or you did not set `TRACELOG_NGINX_SITE`), it prints **step-by-step instructions** in the terminal. Manually:
+
+1. Open your **HTTPS** vhost — on Ubuntu/Debian this is often:
+   - **`/etc/nginx/sites-enabled/cadourile.ro`**  
+   (discover: `sudo grep -r server_name /etc/nginx/sites-enabled/`)
+2. Inside the `server { }` block that has **`listen 443`** (ssl) and **`server_name`**, add **after** `server_name` (same indentation as the other directives):
+
+```nginx
+    include /etc/nginx/snippets/tracelog-subpath-loc.conf;
+```
+
+Example fragment:
+
+```nginx
+server {
+    server_name cadourile.ro www.cadourile.ro;
+    include /etc/nginx/snippets/tracelog-subpath-loc.conf;
+    ...
+}
+```
+
+3. Test and reload: **`sudo nginx -t && sudo systemctl reload nginx`**
+
+The installer always creates **`/etc/nginx/conf.d/tracelog-subpath-map.conf`** (WebSocket `map`) and **`/etc/nginx/snippets/tracelog-subpath-loc.conf`** (`location /tracelog/` → `http://127.0.0.1:8090/`). You only need to add the **`include`** in your site if auto-inject did not run.
+
+**Agents:** hub URL **`https://cadourile.ro/tracelog`** (no trailing slash is fine).
 
 ### Uninstall (restore system to pre-install state)
 
