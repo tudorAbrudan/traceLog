@@ -206,6 +206,29 @@ make lint
 make test
 ```
 
+## Publishing a release (GitHub)
+
+Releases are built automatically with **[GoReleaser](https://goreleaser.com/)** when you push a **version tag**:
+
+```bash
+git tag v0.1.0   # semver; must start with v
+git push origin v0.1.0
+```
+
+Workflow [`.github/workflows/release.yml`](.github/workflows/release.yml) runs on `v*`, builds the embedded frontend, then uploads:
+
+- `tracelog_linux_amd64.tar.gz`, `tracelog_linux_arm64.tar.gz`, same for `darwin`
+- `checksums.txt`
+
+After the first release, **`install.sh`** can download the tarball (no Go on the server). The Go module path stays `github.com/tudorAbrudan/tracelog`; the **GitHub repo** name used for releases is **`traceLog`**.
+
+**Local release (optional):** install [goreleaser](https://goreleaser.com/install/), set `GITHUB_TOKEN`, then `goreleaser release --clean`.
+
+### One binary vs “one installer”
+
+- **`tracelog`** is a **single binary** (UI embedded): that *is* the application.
+- **`install.sh`** is a **one-liner** you pipe to `bash`: it places that binary under `/usr/local/bin`, adds systemd, config, and data dirs — no separate installer executable.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

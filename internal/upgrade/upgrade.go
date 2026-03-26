@@ -19,7 +19,7 @@ import (
 
 const (
 	owner = "tudorAbrudan"
-	repo  = "tracelog"
+	repo  = "traceLog"
 )
 
 type release struct {

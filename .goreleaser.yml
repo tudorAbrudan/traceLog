@@ -45,6 +45,7 @@ changelog:
 release:
   github:
     owner: tudorAbrudan
-    name: tracelog
+    # Must match the GitHub repository name (e.g. traceLog, not only the go module path).
+    name: traceLog
   draft: false
   prerelease: auto
