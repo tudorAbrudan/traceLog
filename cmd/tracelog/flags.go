@@ -20,7 +20,9 @@ func parseServeFlags(cfg *models.Config) {
 		fmt.Println("\nOptions:")
 		fs.PrintDefaults()
 	}
-	fs.Parse(os.Args[2:])
+	if err := fs.Parse(os.Args[2:]); err != nil {
+		os.Exit(2)
+	}
 }
 
 func parseHubFlags(cfg *models.Config) {
@@ -35,7 +37,9 @@ func parseHubFlags(cfg *models.Config) {
 		fmt.Println("\nOptions:")
 		fs.PrintDefaults()
 	}
-	fs.Parse(os.Args[2:])
+	if err := fs.Parse(os.Args[2:]); err != nil {
+		os.Exit(2)
+	}
 }
 
 func parseAgentFlags(cfg *models.Config) {
@@ -48,7 +52,9 @@ func parseAgentFlags(cfg *models.Config) {
 		fmt.Println("\nOptions:")
 		fs.PrintDefaults()
 	}
-	fs.Parse(os.Args[2:])
+	if err := fs.Parse(os.Args[2:]); err != nil {
+		os.Exit(2)
+	}
 
 	if cfg.HubURL == "" || cfg.APIKey == "" {
 		fmt.Fprintln(os.Stderr, "Error: --hub and --key are required for agent mode")

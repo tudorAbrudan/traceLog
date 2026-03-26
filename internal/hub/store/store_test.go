@@ -103,7 +103,9 @@ func TestSession(t *testing.T) {
 		t.Errorf("session returned wrong user: %q vs %q", fetched.ID, user.ID)
 	}
 
-	s.DeleteSession(ctx, token)
+	if err := s.DeleteSession(ctx, token); err != nil {
+		t.Fatal("DeleteSession failed:", err)
+	}
 	_, err = s.GetUserBySession(ctx, token)
 	if err == nil {
 		t.Error("expected error after deleting session, got nil")
@@ -118,7 +120,9 @@ func TestExpiredSession(t *testing.T) {
 	user, _ := s.CreateUser(ctx, "expuser", "pass1234")
 	token := "expired-token"
 	expires := time.Now().Add(-time.Hour)
-	s.CreateSession(ctx, token, user.ID, expires)
+	if err := s.CreateSession(ctx, token, user.ID, expires); err != nil {
+		t.Fatal(err)
+	}
 
 	_, err := s.GetUserBySession(ctx, token)
 	if err == nil {
@@ -239,7 +243,9 @@ func TestBackup(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	s.CreateUser(ctx, "backup-test", "pass1234")
+	if _, err := s.CreateUser(ctx, "backup-test", "pass1234"); err != nil {
+		t.Fatal(err)
+	}
 
 	backupPath := filepath.Join(t.TempDir(), "test-backup.db")
 	if err := s.Backup(ctx, backupPath); err != nil {

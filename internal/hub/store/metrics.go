@@ -66,10 +66,17 @@ func (s *Store) QueryMetrics(ctx context.Context, serverID string, from, to time
 }
 
 func (s *Store) CreateServer(ctx context.Context, name, host string) (*models.Server, error) {
-	id := generateID()
-	apiKey := "tl_" + generateID()
+	id, err := generateID()
+	if err != nil {
+		return nil, err
+	}
+	keySuffix, err := generateID()
+	if err != nil {
+		return nil, err
+	}
+	apiKey := "tl_" + keySuffix
 
-	_, err := s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO servers (id, name, host, api_key, status, created_at)
 		VALUES (?, ?, ?, ?, 'pending', ?)`,
 		id, name, host, apiKey, time.Now().UTC().Format(time.RFC3339),
@@ -149,10 +156,17 @@ func (s *Store) DeleteServer(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	s.db.ExecContext(ctx, `DELETE FROM metrics WHERE server_id = ?`, id)
-	s.db.ExecContext(ctx, `DELETE FROM docker_metrics WHERE server_id = ?`, id)
-	s.db.ExecContext(ctx, `DELETE FROM logs WHERE server_id = ?`, id)
-	s.db.ExecContext(ctx, `DELETE FROM access_logs WHERE server_id = ?`, id)
+	tables := []string{
+		`DELETE FROM metrics WHERE server_id = ?`,
+		`DELETE FROM docker_metrics WHERE server_id = ?`,
+		`DELETE FROM logs WHERE server_id = ?`,
+		`DELETE FROM access_logs WHERE server_id = ?`,
+	}
+	for _, q := range tables {
+		if _, err := s.db.ExecContext(ctx, q, id); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -184,8 +198,10 @@ func (s *Store) EnsureLocalServer(ctx context.Context) (*models.Server, error) {
 	return s.CreateServer(ctx, hostname, "localhost")
 }
 
-func generateID() string {
+func generateID() (string, error) {
 	b := make([]byte, 12)
-	rand.Read(b)
-	return hex.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate id: %w", err)
+	}
+	return hex.EncodeToString(b), nil
 }

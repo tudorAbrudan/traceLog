@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -29,6 +30,9 @@ type Hub struct {
 
 	ingestSystem, ingestDocker, ingestLog, ingestAccess, ingestProcess atomic.Uint64
 	httpAPI, httpDashboard, httpHealth, httpMetrics, httpWS, httpOther  atomic.Uint64
+
+	dockerLogMu      sync.Mutex
+	dockerLogWaiters map[string]chan dockerLogResult
 }
 
 func New(cfg *models.Config) (*Hub, error) {
@@ -50,14 +54,15 @@ func New(cfg *models.Config) (*Hub, error) {
 	})
 
 	h := &Hub{
-		cfg:         cfg,
-		store:       s,
-		mux:         http.NewServeMux(),
-		rateLimiter: newLoginRateLimiter(),
-		ws:          newWSHub(),
-		alerts:      alertEngine,
-		uptime:      uptimeChecker,
-		notify:      notifyMgr,
+		cfg:              cfg,
+		store:            s,
+		mux:              http.NewServeMux(),
+		rateLimiter:      newLoginRateLimiter(),
+		ws:               newWSHub(),
+		alerts:           alertEngine,
+		uptime:           uptimeChecker,
+		notify:           notifyMgr,
+		dockerLogWaiters: make(map[string]chan dockerLogResult),
 	}
 
 	h.registerRoutes()
@@ -118,7 +123,9 @@ func (h *Hub) EnsureLocalServer(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	h.store.UpdateServerStatus(ctx, srv.ID, "online")
+	if err := h.store.UpdateServerStatus(ctx, srv.ID, "online"); err != nil {
+		slog.Warn("EnsureLocalServer: update status", "error", err)
+	}
 	return srv.ID, nil
 }
 

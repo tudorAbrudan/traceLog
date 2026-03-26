@@ -13,10 +13,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
-      - uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
+          go-version: "1.26.1"
+          cache: true
+      # Prebuilt golangci-lint releases are built with an older Go and refuse go.mod > that version.
+      # Building from source with the same toolchain as the project fixes "targeted Go version" errors.
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
+      - name: Run golangci-lint
+        run: golangci-lint run --timeout=5m
 
   test:
     runs-on: ubuntu-latest
@@ -24,7 +28,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version: "1.26.1"
+          cache: true
       - run: go test -race -coverprofile=coverage.out ./...
       - uses: actions/upload-artifact@v4
         with:
@@ -38,7 +43,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version: "1.26.1"
+          cache: true
       - uses: actions/setup-node@v4
         with:
           node-version: "20"

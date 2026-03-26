@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 
 	"github.com/tudorAbrudan/tracelog/internal/hub/alerts"
 )
@@ -37,7 +38,9 @@ func (s *Store) ListAlertRules(ctx context.Context) ([]alerts.Rule, error) {
 func (s *Store) CreateAlertRule(ctx context.Context, r *alerts.Rule) error {
 	if r.ID == "" {
 		b := make([]byte, 8)
-		rand.Read(b)
+		if _, err := rand.Read(b); err != nil {
+			return fmt.Errorf("generate alert rule id: %w", err)
+		}
 		r.ID = hex.EncodeToString(b)
 	}
 	enabled := 0

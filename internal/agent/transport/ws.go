@@ -11,8 +11,12 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/tudorAbrudan/tracelog/internal/hub/dockerlogs"
 	"github.com/tudorAbrudan/tracelog/internal/models"
 )
+
+// Limits concurrent docker logs fetches so many UI requests cannot fork unbounded "docker logs" processes.
+const maxConcurrentDockerLogRequests = 8
 
 type WSTransport struct {
 	hubURL   string
@@ -22,6 +26,8 @@ type WSTransport struct {
 	buffer   []Message
 	maxBuf   int
 	serverID string
+
+	dockerLogsSem chan struct{} // acquire before running docker logs for hub
 }
 
 type Message struct {
@@ -31,9 +37,10 @@ type Message struct {
 
 func NewWSTransport(hubURL, apiKey string) *WSTransport {
 	return &WSTransport{
-		hubURL: hubURL,
-		apiKey: apiKey,
-		maxBuf: 1000,
+		hubURL:        hubURL,
+		apiKey:        apiKey,
+		maxBuf:        1000,
+		dockerLogsSem: make(chan struct{}, maxConcurrentDockerLogRequests),
 	}
 }
 
@@ -47,11 +54,14 @@ func (t *WSTransport) Connect(ctx context.Context) error {
 	headers := http.Header{}
 	headers.Set("X-API-Key", t.apiKey)
 
-	conn, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{
+	conn, resp, err := websocket.Dial(ctx, url, &websocket.DialOptions{
 		HTTPHeader: headers,
 	})
 	if err != nil {
 		return fmt.Errorf("connect to hub %s: %w", url, err)
+	}
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
 	}
 
 	t.mu.Lock()
@@ -80,12 +90,106 @@ func (t *WSTransport) ConnectWithRetry(ctx context.Context) {
 
 		if err := t.Connect(ctx); err != nil {
 			slog.Warn("Failed to connect to hub, retrying...", "error", err, "backoff", backoff)
-			time.Sleep(backoff)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(backoff):
+			}
 			backoff = min(backoff*2, maxBackoff)
 			continue
 		}
+		backoff = time.Second
+		t.readLoop(ctx)
+		t.mu.Lock()
+		if t.conn != nil {
+			_ = t.conn.Close(websocket.StatusGoingAway, "reconnecting")
+			t.conn = nil
+		}
+		t.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Second):
+		}
+	}
+}
+
+func (t *WSTransport) readLoop(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		t.mu.Lock()
+		c := t.conn
+		t.mu.Unlock()
+		if c == nil {
+			return
+		}
+		_, data, err := c.Read(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			slog.Warn("Hub read ended, reconnecting", "error", err)
+			return
+		}
+		var msg Message
+		if err := json.Unmarshal(data, &msg); err != nil {
+			slog.Warn("Invalid message from hub", "error", err)
+			continue
+		}
+		switch msg.Type {
+		case "docker_logs_request":
+			go t.handleDockerLogsRequest(msg.Data)
+		default:
+			slog.Debug("Unknown hub message type", "type", msg.Type)
+		}
+	}
+}
+
+func (t *WSTransport) sendDockerLogsResponse(requestID, logs, errStr string) {
+	resp, mErr := json.Marshal(map[string]any{
+		"request_id": requestID,
+		"logs":       logs,
+		"error":      errStr,
+	})
+	if mErr != nil {
 		return
 	}
+	sendCtx, sendCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer sendCancel()
+	if sErr := t.send(sendCtx, Message{Type: "docker_logs_response", Data: resp}); sErr != nil {
+		slog.Warn("docker_logs_response send failed", "error", sErr)
+	}
+}
+
+func (t *WSTransport) handleDockerLogsRequest(raw json.RawMessage) {
+	var payload struct {
+		RequestID string `json:"request_id"`
+		Container string `json:"container"`
+		Tail      int    `json:"tail"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		slog.Warn("docker_logs_request: invalid payload", "error", err)
+		return
+	}
+	select {
+	case t.dockerLogsSem <- struct{}{}:
+		defer func() { <-t.dockerLogsSem }()
+	default:
+		t.sendDockerLogsResponse(payload.RequestID, "", "too many concurrent docker log requests")
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 32*time.Second)
+	defer cancel()
+	logs, err := dockerlogs.Fetch(ctx, payload.Container, payload.Tail)
+	errStr := ""
+	if err != nil {
+		errStr = err.Error()
+	}
+	t.sendDockerLogsResponse(payload.RequestID, logs, errStr)
 }
 
 func (t *WSTransport) SendMetrics(ctx context.Context, m *models.SystemMetrics) error {

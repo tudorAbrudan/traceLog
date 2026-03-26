@@ -15,6 +15,7 @@ import (
 type agentConn struct {
 	serverID string
 	conn     *websocket.Conn
+	writeMu  sync.Mutex
 }
 
 type wsHub struct {
@@ -59,9 +60,13 @@ func (h *Hub) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 		slog.Error("WebSocket accept failed", "error", err)
 		return
 	}
-	defer conn.CloseNow()
+	defer func() {
+		_ = conn.CloseNow() //nolint:errcheck // WebSocket close on handler exit
+	}()
 
-	h.store.UpdateServerStatus(r.Context(), server.ID, "online")
+	if err := h.store.UpdateServerStatus(r.Context(), server.ID, "online"); err != nil {
+		slog.Warn("agent connect: update status", "error", err)
+	}
 	slog.Info("Agent connected", "server", server.Name, "id", server.ID)
 
 	h.ws.mu.Lock()
@@ -72,29 +77,37 @@ func (h *Hub) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 		h.ws.mu.Lock()
 		delete(h.ws.agents, server.ID)
 		h.ws.mu.Unlock()
-		h.store.UpdateServerStatus(context.Background(), server.ID, "offline")
+		if err := h.store.UpdateServerStatus(context.Background(), server.ID, "offline"); err != nil {
+			slog.Warn("agent disconnect: update status", "error", err)
+		}
 		slog.Info("Agent disconnected", "server", server.Name)
 	}()
 
 	ctx := r.Context()
-	for {
-		_, data, err := conn.Read(ctx)
-		if err != nil {
-			if websocket.CloseStatus(err) == websocket.StatusNormalClosure {
+	readDone := make(chan struct{})
+	go func() {
+		defer close(readDone)
+		for {
+			_, data, err := conn.Read(ctx)
+			if err != nil {
+				if websocket.CloseStatus(err) == websocket.StatusNormalClosure {
+					return
+				}
+				slog.Warn("Agent read error", "server", server.Name, "error", err)
 				return
 			}
-			slog.Warn("Agent read error", "server", server.Name, "error", err)
-			return
-		}
 
-		var msg wsMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			slog.Warn("Invalid message from agent", "error", err)
-			continue
-		}
+			var msg wsMessage
+			if err := json.Unmarshal(data, &msg); err != nil {
+				slog.Warn("Invalid message from agent", "error", err)
+				continue
+			}
 
-		h.processAgentMessage(ctx, server.ID, &msg)
-	}
+			h.processAgentMessage(context.Background(), server.ID, &msg)
+		}
+	}()
+
+	<-readDone
 }
 
 func (h *Hub) processAgentMessage(ctx context.Context, serverID string, msg *wsMessage) {
@@ -157,6 +170,18 @@ func (h *Hub) processAgentMessage(ctx context.Context, serverID string, msg *wsM
 		if err := h.IngestLog(ctx, &entry); err != nil {
 			slog.Error("Failed to store log entry", "error", err)
 		}
+
+	case "docker_logs_response":
+		var payload struct {
+			RequestID string `json:"request_id"`
+			Logs      string `json:"logs"`
+			Error     string `json:"error"`
+		}
+		if err := json.Unmarshal(msg.Data, &payload); err != nil {
+			slog.Warn("Invalid docker_logs_response", "error", err)
+			return
+		}
+		h.deliverDockerLogResponse(payload.RequestID, payload.Logs, payload.Error)
 
 	default:
 		slog.Warn("Unknown message type from agent", "type", msg.Type)

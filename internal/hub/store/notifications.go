@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 
 	"github.com/tudorAbrudan/tracelog/internal/hub/notify"
 )
@@ -30,7 +31,9 @@ func (s *Store) ListNotificationChannels(ctx context.Context) ([]notify.Channel,
 func (s *Store) CreateNotificationChannel(ctx context.Context, ch *notify.Channel) error {
 	if ch.ID == "" {
 		b := make([]byte, 8)
-		rand.Read(b)
+		if _, err := rand.Read(b); err != nil {
+			return fmt.Errorf("generate notification channel id: %w", err)
+		}
 		ch.ID = hex.EncodeToString(b)
 	}
 	_, err := s.db.ExecContext(ctx,

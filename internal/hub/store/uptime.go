@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"time"
 
 	"github.com/tudorAbrudan/tracelog/internal/hub/uptime"
@@ -68,7 +69,9 @@ func (s *Store) ListUptimeChecks(ctx context.Context) ([]uptime.Check, error) {
 func (s *Store) CreateUptimeCheck(ctx context.Context, c *uptime.Check) error {
 	if c.ID == "" {
 		b := make([]byte, 8)
-		rand.Read(b)
+		if _, err := rand.Read(b); err != nil {
+			return fmt.Errorf("generate uptime check id: %w", err)
+		}
 		c.ID = hex.EncodeToString(b)
 	}
 	if c.Interval == 0 {

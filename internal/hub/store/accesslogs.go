@@ -64,7 +64,9 @@ func (s *Store) GetAccessLogStats(ctx context.Context, serverID string, since ti
 		for rows.Next() {
 			var code string
 			var count int
-			rows.Scan(&code, &count)
+			if err := rows.Scan(&code, &count); err != nil {
+				return nil, err
+			}
 			stats.StatusCodes[code] = count
 		}
 	}
@@ -78,7 +80,9 @@ func (s *Store) GetAccessLogStats(ctx context.Context, serverID string, since ti
 		defer rows.Close()
 		for rows.Next() {
 			var pc PathCount
-			rows.Scan(&pc.Path, &pc.Count)
+			if err := rows.Scan(&pc.Path, &pc.Count); err != nil {
+				return nil, err
+			}
 			stats.TopPaths = append(stats.TopPaths, pc)
 		}
 	}
@@ -92,7 +96,9 @@ func (s *Store) GetAccessLogStats(ctx context.Context, serverID string, since ti
 		defer rows.Close()
 		for rows.Next() {
 			var ic IPCount
-			rows.Scan(&ic.IP, &ic.Count)
+			if err := rows.Scan(&ic.IP, &ic.Count); err != nil {
+				return nil, err
+			}
 			stats.TopIPs = append(stats.TopIPs, ic)
 		}
 	}

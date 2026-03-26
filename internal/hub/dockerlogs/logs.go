@@ -27,6 +27,7 @@ func Fetch(ctx context.Context, container string, tail int) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
+	//nolint:gosec // container is validated by safeContainer before use.
 	cmd := exec.CommandContext(ctx, "docker", "logs", "--tail", fmt.Sprintf("%d", tail), "--timestamps", container)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

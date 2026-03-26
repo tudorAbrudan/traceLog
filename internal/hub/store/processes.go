@@ -12,7 +12,9 @@ func (s *Store) InsertProcessMetrics(ctx context.Context, metrics []models.Proce
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		_ = tx.Rollback() //nolint:errcheck // expected sql.ErrTxDone after Commit
+	}()
 
 	stmt, err := tx.PrepareContext(ctx,
 		`INSERT INTO process_metrics (server_id, ts, pid, name, cmdline, status, cpu_percent, mem_rss, mem_vms, threads)

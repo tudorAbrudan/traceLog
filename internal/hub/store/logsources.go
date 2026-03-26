@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 )
 
 type LogSourceRecord struct {
@@ -42,7 +43,9 @@ func (s *Store) ListLogSources(ctx context.Context) ([]LogSourceRecord, error) {
 func (s *Store) CreateLogSource(ctx context.Context, ls *LogSourceRecord) error {
 	if ls.ID == "" {
 		b := make([]byte, 8)
-		rand.Read(b)
+		if _, err := rand.Read(b); err != nil {
+			return fmt.Errorf("generate log source id: %w", err)
+		}
 		ls.ID = hex.EncodeToString(b)
 	}
 	enabled := 0

@@ -155,7 +155,11 @@ func (h *Hub) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token := generateToken()
+	token, err := generateToken()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to create session")
+		return
+	}
 	expiresAt := time.Now().Add(7 * 24 * time.Hour)
 
 	if err := h.store.CreateSession(r.Context(), token, user.ID, expiresAt); err != nil {
@@ -163,7 +167,11 @@ func (h *Hub) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	csrfToken := generateToken()
+	csrfToken, err := generateToken()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to create session")
+		return
+	}
 
 	http.SetCookie(w, &http.Cookie{
 		Name:     "tracelog_session",
@@ -193,7 +201,9 @@ func (h *Hub) handleLogin(w http.ResponseWriter, r *http.Request) {
 func (h *Hub) handleLogout(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie("tracelog_session")
 	if err == nil {
-		h.store.DeleteSession(r.Context(), cookie.Value)
+		if err := h.store.DeleteSession(r.Context(), cookie.Value); err != nil {
+			slog.Debug("logout delete session", "error", err)
+		}
 	}
 
 	http.SetCookie(w, &http.Cookie{
@@ -263,11 +273,22 @@ func (h *Hub) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token := generateToken()
+	token, err := generateToken()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to create session")
+		return
+	}
 	expiresAt := time.Now().Add(7 * 24 * time.Hour)
-	h.store.CreateSession(ctx, token, user.ID, expiresAt)
+	if err := h.store.CreateSession(ctx, token, user.ID, expiresAt); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to create session: %v", err)
+		return
+	}
 
-	csrfToken := generateToken()
+	csrfToken, err := generateToken()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to create session")
+		return
+	}
 
 	http.SetCookie(w, &http.Cookie{
 		Name:     "tracelog_session",
@@ -293,10 +314,12 @@ func (h *Hub) handleSetup(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func generateToken() string {
+func generateToken() (string, error) {
 	b := make([]byte, 32)
-	rand.Read(b)
-	return hex.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate token: %w", err)
+	}
+	return hex.EncodeToString(b), nil
 }
 
 func extractIP(r *http.Request) string {

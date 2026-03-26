@@ -158,7 +158,10 @@ func cmdUser() {
 		if len(os.Args) > 3 {
 			username = os.Args[3]
 		}
-		password := store.GeneratePassword()
+		password, err := store.GeneratePassword()
+		if err != nil {
+			fatal("Failed to generate password: %v", err)
+		}
 		user, err := s.CreateUser(ctx, username, password)
 		if err != nil {
 			fatal("Failed to create user: %v", err)
@@ -173,7 +176,10 @@ func cmdUser() {
 			fatal("Usage: tracelog user reset-password <username>")
 		}
 		username := os.Args[3]
-		password := store.GeneratePassword()
+		password, err := store.GeneratePassword()
+		if err != nil {
+			fatal("Failed to generate password: %v", err)
+		}
 		if err := s.UpdatePassword(ctx, username, password); err != nil {
 			fatal("Failed to reset password: %v", err)
 		}
@@ -293,7 +299,9 @@ func cmdRestore() {
 	for {
 		n, err := srcFile.Read(buf)
 		if n > 0 {
-			dstFile.Write(buf[:n])
+			if _, werr := dstFile.Write(buf[:n]); werr != nil {
+				fatal("Write failed: %v", werr)
+			}
 		}
 		if err != nil {
 			break
@@ -342,7 +350,9 @@ func cmdUninstall() {
 	// Ask about data
 	fmt.Print("\nDelete all data (/var/lib/tracelog)? [y/N] ")
 	var answer string
-	fmt.Scanln(&answer)
+	if _, err := fmt.Scanln(&answer); err != nil {
+		answer = "" // EOF or unreadable input — treat as "no"
+	}
 	if answer == "y" || answer == "Y" {
 		os.RemoveAll("/var/lib/tracelog")
 		fmt.Println("Data deleted")
@@ -370,7 +380,9 @@ func cmdUpgrade() {
 
 func exec(name string, args ...string) {
 	cmd := osexec.Command(name, args...)
-	cmd.Run()
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "%s %v: %v\n", name, args, err)
+	}
 }
 
 func fatal(format string, args ...any) {

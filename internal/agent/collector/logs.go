@@ -47,7 +47,10 @@ func (lc *LogCollector) tailFile(ctx context.Context, src models.LogSource) {
 	defer f.Close()
 
 	// Seek to end of file
-	f.Seek(0, 2)
+	if _, err := f.Seek(0, 2); err != nil {
+		slog.Error("Seek log file", "path", src.Path, "error", err)
+		return
+	}
 
 	scanner := bufio.NewScanner(f)
 	for {

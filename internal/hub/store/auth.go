@@ -18,7 +18,10 @@ func (s *Store) CreateUser(ctx context.Context, username, password string) (*mod
 		return nil, fmt.Errorf("hash password: %w", err)
 	}
 
-	id := generateUserID()
+	id, err := generateUserID()
+	if err != nil {
+		return nil, err
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	_, err = s.db.ExecContext(ctx, `
@@ -121,7 +124,7 @@ func (s *Store) GetUserBySession(ctx context.Context, token string) (*models.Use
 
 	expiresAt, _ := time.Parse(time.RFC3339, expires)
 	if time.Now().After(expiresAt) {
-		s.DeleteSession(ctx, token)
+		_ = s.DeleteSession(ctx, token) //nolint:errcheck // best-effort cleanup of expired session row
 		return nil, fmt.Errorf("session expired")
 	}
 
@@ -129,27 +132,33 @@ func (s *Store) GetUserBySession(ctx context.Context, token string) (*models.Use
 	return &u, nil
 }
 
-func (s *Store) DeleteSession(ctx context.Context, token string) {
-	s.db.ExecContext(ctx, "DELETE FROM sessions WHERE token = ?", token)
+func (s *Store) DeleteSession(ctx context.Context, token string) error {
+	_, err := s.db.ExecContext(ctx, "DELETE FROM sessions WHERE token = ?", token)
+	return err
 }
 
-func (s *Store) CleanExpiredSessions(ctx context.Context) {
-	s.db.ExecContext(ctx, "DELETE FROM sessions WHERE expires_at < ?", time.Now().UTC().Format(time.RFC3339))
+func (s *Store) CleanExpiredSessions(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, "DELETE FROM sessions WHERE expires_at < ?", time.Now().UTC().Format(time.RFC3339))
+	return err
 }
 
-func generateUserID() string {
+func generateUserID() (string, error) {
 	b := make([]byte, 8)
-	rand.Read(b)
-	return hex.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate user id: %w", err)
+	}
+	return hex.EncodeToString(b), nil
 }
 
-func GeneratePassword() string {
+func GeneratePassword() (string, error) {
 	b := make([]byte, 12)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate password: %w", err)
+	}
 	const charset = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$"
 	password := make([]byte, 16)
 	for i := range password {
 		password[i] = charset[int(b[i%len(b)])%len(charset)]
 	}
-	return string(password)
+	return string(password), nil
 }

@@ -2,7 +2,9 @@ package hub
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -124,12 +126,6 @@ func (h *Hub) handleDockerContainerLogs(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusNotFound, "Server not found")
 		return
 	}
-	if srv.Host != "localhost" {
-		writeError(w, http.StatusNotImplemented,
-			"Docker logs are only available for the local server (hub runs docker on the same host). Remote agents do not stream container logs yet.")
-		return
-	}
-
 	container := r.URL.Query().Get("container")
 	tail := 500
 	if t := r.URL.Query().Get("tail"); t != "" {
@@ -138,8 +134,17 @@ func (h *Hub) handleDockerContainerLogs(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	out, err := dockerlogs.Fetch(r.Context(), container, tail)
+	var out string
+	if srv.Host == "localhost" {
+		out, err = dockerlogs.Fetch(r.Context(), container, tail)
+	} else {
+		out, err = h.requestDockerLogsFromAgent(r.Context(), id, container, tail)
+	}
 	if err != nil {
+		if errors.Is(err, ErrAgentNotConnected) {
+			writeError(w, http.StatusServiceUnavailable, "%v", err)
+			return
+		}
 		writeError(w, http.StatusBadRequest, "%v", err)
 		return
 	}
@@ -466,7 +471,9 @@ func (h *Hub) handleDashboard(w http.ResponseWriter, r *http.Request) {
 func writeJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		slog.Error("write JSON response", "error", err)
+	}
 }
 
 func writeError(w http.ResponseWriter, status int, format string, args ...any) {

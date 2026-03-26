@@ -1,4 +1,6 @@
 linters:
+  # Without disable-all, `enable` only adds linters; errcheck would stay on from defaults.
+  disable-all: true
   enable:
     - errcheck
     - gosimple
