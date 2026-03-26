@@ -1,0 +1,8 @@
+{
+  "name": "tracelog-monorepo-scripts",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "vitepress": "^1.6.3"
+  }
+}

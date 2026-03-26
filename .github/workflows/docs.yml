@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - 'docs/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/docs.yml'
 
 permissions:
   contents: read
@@ -24,7 +27,7 @@ jobs:
         with:
           node-version: 20
       - name: Install dependencies
-        run: npm install -D vitepress
+        run: npm ci
       - name: Build docs
         run: npx vitepress build docs
       - uses: actions/upload-pages-artifact@v3
