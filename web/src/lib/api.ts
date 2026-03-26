@@ -34,6 +34,8 @@ export const api = {
   getServer: (id: string) => request('GET', `/servers/${id}`),
   getMetrics: (id: string, range_: string = '1h') => request('GET', `/servers/${id}/metrics?range=${range_}`),
   getDockerMetrics: (id: string, range_: string = '1h') => request('GET', `/servers/${id}/docker?range=${range_}`),
+  getDockerLogs: (id: string, container: string, tail = 500) =>
+    request('GET', `/servers/${id}/docker/logs?container=${encodeURIComponent(container)}&tail=${tail}`),
   createServer: (name: string, host: string) => request('POST', '/servers', { name, host }),
   deleteServer: (id: string) => request('DELETE', `/servers/${id}`),
 

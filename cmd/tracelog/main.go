@@ -11,6 +11,7 @@ import (
 	"github.com/tudorAbrudan/tracelog/internal/hub"
 	"github.com/tudorAbrudan/tracelog/internal/hub/store"
 	"github.com/tudorAbrudan/tracelog/internal/models"
+	"github.com/tudorAbrudan/tracelog/internal/upgrade"
 )
 
 var version = "dev"
@@ -358,17 +359,13 @@ func cmdUninstall() {
 }
 
 func cmdUpgrade() {
-	fmt.Printf("Current version: %s\n", version)
-	fmt.Println("Checking for updates...")
-
-	fmt.Println()
-	fmt.Println("To upgrade, run the install script:")
-	fmt.Println("  curl -sSL https://raw.githubusercontent.com/tudorAbrudan/tracelog/main/scripts/install.sh | bash")
-	fmt.Println()
-	fmt.Println("Or build from source:")
-	fmt.Println("  git pull && make build")
-	fmt.Println()
-	fmt.Println("The installer will automatically stop the service, replace the binary, run database migrations, and restart.")
+	if err := upgrade.Run(version); err != nil {
+		fmt.Fprintf(os.Stderr, "Upgrade failed: %v\n", err)
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(os.Stderr, "Fallback — install script:")
+		fmt.Fprintln(os.Stderr, "  curl -sSL https://raw.githubusercontent.com/tudorAbrudan/tracelog/main/scripts/install.sh | bash")
+		os.Exit(1)
+	}
 }
 
 func exec(name string, args ...string) {

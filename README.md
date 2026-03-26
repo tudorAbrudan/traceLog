@@ -7,13 +7,13 @@
 ## Features
 
 - **System Metrics** — CPU, memory, disk, network, load average, uptime
-- **Docker Monitoring** — Container CPU, memory, network per container
+- **Docker Monitoring** — Container CPU, memory, network; view **container logs** from the server detail page (local server)
 - **Log Aggregation** — Tail any log file, parse nginx/apache access logs, search & filter
 - **Uptime Monitoring** — HTTP endpoint checks with response time tracking
 - **Alerts** — Configurable threshold rules with email (SMTP) and webhook notifications
 - **Beautiful Dashboard** — Dark mode, responsive, real-time charts with uPlot
 - **Single Binary** — No runtime dependencies, embeds the web UI
-- **Easy Install** — One-line installer with auto-detection
+- **Easy Install** — One-line installer with auto-detection; **`tracelog upgrade`** pulls the latest release with checksum verification
 - **30-Day Retention** — Configurable automatic data cleanup
 - **Multi-Server** — Hub/Agent architecture with WebSocket transport
 

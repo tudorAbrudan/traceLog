@@ -221,6 +221,7 @@ func (h *Hub) registerRoutes() {
 	h.mux.HandleFunc("GET /api/servers/{id}", auth(h.handleGetServer))
 	h.mux.HandleFunc("GET /api/servers/{id}/metrics", auth(h.handleGetMetrics))
 	h.mux.HandleFunc("GET /api/servers/{id}/docker", auth(h.handleGetDockerMetrics))
+	h.mux.HandleFunc("GET /api/servers/{id}/docker/logs", auth(h.handleDockerContainerLogs))
 	h.mux.HandleFunc("GET /api/servers/{id}/processes", auth(h.handleGetProcesses))
 	h.mux.HandleFunc("POST /api/servers", auth(csrf(h.handleCreateServer)))
 	h.mux.HandleFunc("DELETE /api/servers/{id}", auth(csrf(h.handleDeleteServer)))

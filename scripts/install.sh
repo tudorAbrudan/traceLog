@@ -64,15 +64,24 @@ download_binary() {
         exit 1
     fi
 
-    DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${LATEST}/${BINARY_NAME}_${OS}_${ARCH}"
+    ARCHIVE="${BINARY_NAME}_${OS}_${ARCH}.tar.gz"
+    DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${LATEST}/${ARCHIVE}"
 
-    if ! curl -sL -o "/tmp/${BINARY_NAME}" "$DOWNLOAD_URL"; then
+    if ! curl -sL -f -o "/tmp/${ARCHIVE}" "$DOWNLOAD_URL"; then
         error "Download failed from: $DOWNLOAD_URL"
+        exit 1
+    fi
+
+    rm -f "/tmp/${BINARY_NAME}"
+    tar -xzf "/tmp/${ARCHIVE}" -C /tmp "${BINARY_NAME}" 2>/dev/null || tar -xzf "/tmp/${ARCHIVE}" -C /tmp
+    if [ ! -f "/tmp/${BINARY_NAME}" ]; then
+        error "Archive did not contain ${BINARY_NAME}"
         exit 1
     fi
 
     chmod +x "/tmp/${BINARY_NAME}"
     sudo mv "/tmp/${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}"
+    rm -f "/tmp/${ARCHIVE}"
     ok "Installed to ${INSTALL_DIR}/${BINARY_NAME}"
 }
 

@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/tudorAbrudan/tracelog/internal/agent/detect"
 	"github.com/tudorAbrudan/tracelog/internal/hub/alerts"
+	"github.com/tudorAbrudan/tracelog/internal/hub/dockerlogs"
 	"github.com/tudorAbrudan/tracelog/internal/hub/notify"
 	"github.com/tudorAbrudan/tracelog/internal/hub/store"
 	"github.com/tudorAbrudan/tracelog/internal/hub/uptime"
@@ -113,6 +115,35 @@ func (h *Hub) handleGetDockerMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, metrics)
+}
+
+func (h *Hub) handleDockerContainerLogs(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	srv, err := h.store.GetServer(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "Server not found")
+		return
+	}
+	if srv.Host != "localhost" {
+		writeError(w, http.StatusNotImplemented,
+			"Docker logs are only available for the local server (hub runs docker on the same host). Remote agents do not stream container logs yet.")
+		return
+	}
+
+	container := r.URL.Query().Get("container")
+	tail := 500
+	if t := r.URL.Query().Get("tail"); t != "" {
+		if n, err := strconv.Atoi(t); err == nil {
+			tail = n
+		}
+	}
+
+	out, err := dockerlogs.Fetch(r.Context(), container, tail)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "%v", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"logs": out})
 }
 
 // --- Processes ---
