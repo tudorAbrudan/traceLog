@@ -25,7 +25,8 @@
 The same installer works on every supported server (Linux/macOS, `amd64` / `arm64`):
 
 1. **If you have a [GitHub Release](https://github.com/tudorAbrudan/tracelog/releases)** with `tracelog_linux_amd64.tar.gz` (or `arm64`), it downloads the binary — **no Go needed**.
-2. **If there is no release yet**, it falls back to **`go install`** with `GOTOOLCHAIN=auto` (Go may download a matching toolchain) — **Go must be installed**.
+2. **If there is no release**, it uses **`go install`** when `go` is already on `PATH` (`GOTOOLCHAIN=auto` can fetch a newer toolchain).
+3. **If Go is not installed**, it downloads an official **Go tarball from [go.dev](https://go.dev/dl/)** (~150MB), then runs `go install` once and deletes the temporary tree — **no manual Go install**.
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/tudorAbrudan/tracelog/main/scripts/install.sh | bash

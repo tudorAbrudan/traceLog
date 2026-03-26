@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# TraceLog installer: GitHub release tarball first, then "go install" fallback (GOTOOLCHAIN=auto).
+# TraceLog installer: (1) GitHub release tarball (2) system go install (3) download official Go from go.dev, then go install.
+# Override bootstrap Go versions: TRACELOG_BOOTSTRAP_GO="1.24.3 1.23.5"
 # Uninstall: curl -sSL https://raw.githubusercontent.com/tudorAbrudan/tracelog/main/scripts/uninstall.sh | sudo bash
 set -euo pipefail
 
@@ -122,6 +123,55 @@ install_via_go() {
     return 0
 }
 
+# No system Go: download official Go tarball from go.dev, then go install (GOTOOLCHAIN=auto pulls module toolchain).
+install_via_bootstrap_go() {
+    if ! command -v curl &>/dev/null; then
+        warn "curl is required to download Go; install it (e.g. apt install curl) and re-run."
+        return 1
+    fi
+    info "No system Go found; downloading official Go from go.dev (~150MB, one-time)..."
+    local work
+    work=$(mktemp -d)
+    local versions
+    if [ -n "${TRACELOG_BOOTSTRAP_GO:-}" ]; then
+        versions="$TRACELOG_BOOTSTRAP_GO"
+    else
+        versions="1.24.3 1.23.5 1.22.10"
+    fi
+    local ver tarball url gbin
+    for ver in $versions; do
+        tarball="go${ver}.${OS}-${ARCH}.tar.gz"
+        url="https://go.dev/dl/${tarball}"
+        info "Trying Go ${ver}..."
+        if ! curl -sL -f -o "${work}/${tarball}" "$url"; then
+            rm -f "${work}/${tarball}"
+            continue
+        fi
+        if ! tar -C "$work" -xzf "${work}/${tarball}"; then
+            rm -f "${work}/${tarball}"
+            rm -rf "${work}/go"
+            continue
+        fi
+        rm -f "${work}/${tarball}"
+        export PATH="${work}/go/bin:${PATH}"
+        export GOTOOLCHAIN=auto
+        gbin=$(mktemp -d)
+        export GOBIN="$gbin"
+        if go install github.com/tudorAbrudan/tracelog/cmd/tracelog@latest && [ -f "$gbin/${BINARY_NAME}" ]; then
+            chmod +x "$gbin/${BINARY_NAME}"
+            sudo mv "$gbin/${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}"
+            rm -rf "$gbin" "${work}/go" "$work"
+            ok "Installed via bootstrap Go ${ver} + go install → ${INSTALL_DIR}/${BINARY_NAME}"
+            return 0
+        fi
+        rm -rf "$gbin"
+        rm -rf "${work}/go"
+    done
+    rm -rf "$work"
+    warn "Bootstrap Go + go install failed (network, disk space, or module build error)."
+    return 1
+}
+
 obtain_binary() {
     if try_release_download; then
         return 0
@@ -129,9 +179,11 @@ obtain_binary() {
     if install_via_go; then
         return 0
     fi
+    if install_via_bootstrap_go; then
+        return 0
+    fi
     error "Could not install TraceLog."
-    error "Options: (1) Publish a GitHub release with ${BINARY_NAME}_${OS}_${ARCH}.tar.gz, or"
-    error "          (2) Install Go from https://go.dev/dl/ and re-run this script."
+    error "Fix: ensure curl works, disk space ~300MB free, outbound HTTPS; or publish a GitHub release; or apt install golang-go and re-run."
     exit 1
 }
 
