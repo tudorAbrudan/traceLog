@@ -1,15 +1,19 @@
 package hub
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/tudorAbrudan/tracelog/internal/agent/detect"
+	"github.com/tudorAbrudan/tracelog/internal/hub/ipmatch"
 	"github.com/tudorAbrudan/tracelog/internal/hub/alerts"
 	"github.com/tudorAbrudan/tracelog/internal/hub/dockerlogs"
 	"github.com/tudorAbrudan/tracelog/internal/hub/notify"
@@ -210,6 +214,50 @@ func (h *Hub) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, logs)
 }
 
+func (h *Hub) handlePurgeLogs(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ServerID string `json:"server_id"`
+		Mode     string `json:"mode"` // "all" or "older_than"
+		Range    string `json:"range,omitempty"`
+		Source   string `json:"source,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if body.ServerID == "" {
+		writeError(w, http.StatusBadRequest, "server_id is required")
+		return
+	}
+	if _, err := h.store.GetServer(r.Context(), body.ServerID); err != nil {
+		writeError(w, http.StatusNotFound, "Server not found")
+		return
+	}
+
+	var before time.Time
+	switch body.Mode {
+	case "all", "":
+		before = time.Time{}
+	case "older_than":
+		d, err := parseRange(body.Range)
+		if err != nil || d <= 0 {
+			writeError(w, http.StatusBadRequest, "range is required for older_than (e.g. 24h, 7d, 30d)")
+			return
+		}
+		before = time.Now().Add(-d)
+	default:
+		writeError(w, http.StatusBadRequest, "mode must be all or older_than")
+		return
+	}
+
+	n, err := h.store.DeleteIngestedLogs(r.Context(), body.ServerID, strings.TrimSpace(body.Source), before)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to purge logs: %v", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": n})
+}
+
 // --- Access Logs / HTTP Analytics ---
 
 func (h *Hub) handleAccessLogStats(w http.ResponseWriter, r *http.Request) {
@@ -223,12 +271,125 @@ func (h *Hub) handleAccessLogStats(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Invalid range")
 		return
 	}
-	stats, err := h.store.GetAccessLogStats(r.Context(), id, time.Now().Add(-d))
+	topN := 30
+	if s := r.URL.Query().Get("top_n"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil {
+			topN = n
+		}
+	}
+	since := time.Now().Add(-d)
+	stats, err := h.store.GetAccessLogStats(r.Context(), id, since, topN)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to get access stats")
 		return
 	}
+
+	rules := h.loadAccessIPBlacklist(r.Context())
+	if len(rules) > 0 {
+		const capIPGroups = 15000
+		ipRows, err := h.store.GetAccessLogTopIPCounts(r.Context(), id, since, capIPGroups)
+		if err != nil {
+			slog.Warn("access stats: top ip counts for blacklist", "error", err)
+		} else {
+			for _, row := range ipRows {
+				if ipmatch.Match(row.IP, rules) {
+					stats.BlacklistedHits += row.Count
+				}
+			}
+			if len(ipRows) >= capIPGroups {
+				stats.BlacklistHitsNote = fmt.Sprintf("Blacklist hits summed over the busiest %d distinct IPs (approximation).", capIPGroups)
+			}
+		}
+		seen := make(map[string]bool)
+		addBl := func(ip string) {
+			if ip == "" || seen[ip] {
+				return
+			}
+			if ipmatch.Match(ip, rules) {
+				seen[ip] = true
+				stats.BlacklistedInTop = append(stats.BlacklistedInTop, ip)
+			}
+		}
+		for _, r := range stats.TopIPs {
+			addBl(r.IP)
+		}
+		for _, r := range stats.BadRequestsByIP {
+			addBl(r.IP)
+		}
+	}
+
 	writeJSON(w, http.StatusOK, stats)
+}
+
+func (h *Hub) loadAccessIPBlacklist(ctx context.Context) []string {
+	raw, err := h.store.GetSetting(ctx, "access_ip_blacklist")
+	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			slog.Warn("load access_ip_blacklist", "error", err)
+		}
+		return nil
+	}
+	return ipmatch.ParseJSONArray(raw)
+}
+
+func (h *Hub) handleAccessIPPolicy(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	switch r.Method {
+	case http.MethodGet:
+		raw, err := h.store.GetSetting(ctx, "access_ip_blacklist")
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusInternalServerError, "Failed to read policy")
+			return
+		}
+		ips := ipmatch.ParseJSONArray(raw)
+		writeJSON(w, http.StatusOK, map[string][]string{"ips": ips})
+	case http.MethodPut:
+		var body struct {
+			IPs []string `json:"ips"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeError(w, http.StatusBadRequest, "Invalid JSON body (expected {\"ips\":[\"1.2.3.4\",...]})")
+			return
+		}
+		encoded, err := ipmatch.ToJSONArray(body.IPs)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "Invalid ip list")
+			return
+		}
+		if err := h.store.SetSetting(ctx, "access_ip_blacklist", encoded); err != nil {
+			writeError(w, http.StatusInternalServerError, "Failed to save policy")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+	}
+}
+
+func (h *Hub) handleAccessBadRequests(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	rangeStr := r.URL.Query().Get("range")
+	if rangeStr == "" {
+		rangeStr = "24h"
+	}
+	d, err := parseRange(rangeStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid range")
+		return
+	}
+	ip := strings.TrimSpace(r.URL.Query().Get("ip"))
+	limit := 150
+	if s := r.URL.Query().Get("limit"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil {
+			limit = n
+		}
+	}
+	logs, err := h.store.QueryAccessBadRequests(r.Context(), id, time.Now().Add(-d), ip, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to query bad requests")
+		return
+	}
+	writeJSON(w, http.StatusOK, logs)
 }
 
 func (h *Hub) handleRecentAccessLogs(w http.ResponseWriter, r *http.Request) {
@@ -258,8 +419,9 @@ func (h *Hub) handleCreateLogSource(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
-	if ls.Name == "" || ls.Type == "" {
-		writeError(w, http.StatusBadRequest, "name and type are required")
+	normalizeLogSource(&ls)
+	if err := validateLogSourceRecord(&ls); err != nil {
+		writeError(w, http.StatusBadRequest, "%v", err)
 		return
 	}
 	if err := h.store.CreateLogSource(r.Context(), &ls); err != nil {

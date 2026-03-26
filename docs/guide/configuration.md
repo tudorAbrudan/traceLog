@@ -65,14 +65,19 @@ tracelog agent [flags]
 
 ## Dashboard Settings
 
-Access Settings from the sidebar in the web dashboard:
+Access **Settings** from the sidebar. Short reference:
 
-- **General** — Data retention (1-30 days), collection interval
-- **Log Sources** — Configure which log files to monitor
-- **Notifications** — SMTP email and webhook channels
-- **Servers** — Manage remote agents and API keys
-- **Alerts** — CPU, memory, disk threshold rules
-- **Account** — Current user info
+| Tab | What you configure | Effect |
+|-----|--------------------|--------|
+| **General** | Retention (1–30 days), collection interval | Hourly cleanup of old metrics, **ingested logs**, access logs, uptime, alerts, etc.; how often agents send system metrics. |
+| **Log Sources** | Paths + format (plain / nginx / apache) | Agent tails files; lines are **stored in SQLite** (see [Logs & HTTP analytics](./logs-http-analytics.md)). Scan runs on the **hub host**. |
+| **Notifications** | Email (SMTP JSON), webhooks | Alert delivery channels; test with **Test** on a channel. |
+| **Servers** | Registered agents, API keys | Multi-server; deleting a server removes its metrics/logs rows for that `server_id`. |
+| **Alerts** | Metric, threshold, duration, channel | Fires when conditions hold; uses notification channels. |
+| **Account** | — | Password changes via CLI: `tracelog user reset-password …`. |
+| **About** | — | Build **version** (from `/api/health` when released); link to docs. |
+
+More detail: [Logs & HTTP analytics](./logs-http-analytics.md) (purge, blacklist, bad requests, WHOIS links).
 
 ## Data Storage
 
@@ -83,7 +88,10 @@ All data is stored in a SQLite database at `{data-dir}/tracelog.db` using WAL mo
 Data older than the configured retention period (default 30 days) is automatically cleaned up every hour. This includes:
 - System metrics
 - Docker metrics
-- Logs
-- Access logs
+- Ingested log lines (`logs` table)
+- HTTP access log rows (`access_logs`)
 - Uptime results
 - Alert history
+- Process metrics
+
+This is separate from the **Logs** page **Purge** action, which removes stored lines immediately for a chosen server and optional age/source (see [Logs & HTTP analytics](./logs-http-analytics.md)).

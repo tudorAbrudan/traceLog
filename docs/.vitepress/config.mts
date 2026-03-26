@@ -26,6 +26,7 @@ export default defineConfig({
           { text: 'Multi-Server Setup', link: '/guide/multi-server' },
           { text: 'Alerts', link: '/guide/alerts' },
           { text: 'Reverse Proxy', link: '/guide/reverse-proxy' },
+          { text: 'Logs & HTTP analytics', link: '/guide/logs-http-analytics' },
         ],
       },
     ],

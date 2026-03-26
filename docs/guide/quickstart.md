@@ -66,6 +66,7 @@ make build
 ## What's Next?
 
 - [Configuration](/guide/configuration) — Customize ports, bind address, retention
+- [Logs & HTTP analytics](/guide/logs-http-analytics) — Log sources, purge vs retention, HTTP stats, IP blacklist
 - [Multi-Server Setup](/guide/multi-server) — Monitor multiple servers from one dashboard
 - [Alerts](/guide/alerts) — Set up email and webhook notifications
 - [Reverse Proxy](/guide/reverse-proxy) — Put TraceLog behind nginx with HTTPS

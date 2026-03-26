@@ -311,3 +311,44 @@ func TestLogInsertAndQuery(t *testing.T) {
 		t.Errorf("wrong log message: %q", logs[0].Message)
 	}
 }
+
+func TestDeleteIngestedLogs(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	srv, _ := s.CreateServer(ctx, "p", "")
+	old := time.Now().Add(-48 * time.Hour)
+	newTs := time.Now().Add(-1 * time.Hour)
+	for _, ts := range []time.Time{old, newTs} {
+		if err := s.InsertLog(ctx, &models.LogEntry{
+			ServerID: srv.ID,
+			Ts:       ts,
+			Source:   "app",
+			Level:    "info",
+			Message:  "line",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	n, err := s.DeleteIngestedLogs(ctx, srv.ID, "", time.Now().Add(-36*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("expected 1 deleted, got %d", n)
+	}
+	left, _ := s.QueryLogs(ctx, srv.ID, LogQueryOpts{Limit: 10})
+	if len(left) != 1 {
+		t.Fatalf("expected 1 log left, got %d", len(left))
+	}
+
+	n2, err := s.DeleteIngestedLogs(ctx, srv.ID, "", time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n2 != 1 {
+		t.Fatalf("expected 1 deleted (all), got %d", n2)
+	}
+}

@@ -8,7 +8,8 @@
 
 - **System Metrics** — CPU, memory, disk, network, load average, uptime
 - **Docker Monitoring** — Container CPU, memory, network; view **container logs** from the server detail page (local server)
-- **Log Aggregation** — Tail any log file, parse nginx/apache access logs, search & filter
+- **Log Aggregation** — Tail log files, validate formats, scan common paths; **Logs** viewer + optional **purge** of stored lines (DB only, not disk files)
+- **HTTP Analytics** — Top paths, IPs, method+path, unique IPs, **4xx/5xx** per IP with drill-down, optional **IP blacklist** (highlight + volume estimate; blocking is done in nginx/firewall)
 - **Uptime Monitoring** — HTTP endpoint checks with response time tracking
 - **Alerts** — Configurable threshold rules with email (SMTP) and webhook notifications
 - **Beautiful Dashboard** — Dark mode, responsive, real-time charts with uPlot
@@ -192,9 +193,10 @@ The web dashboard provides:
 
 - **Overview** — Server cards with status indicators
 - **Server Detail** — CPU, memory, disk, network, load charts with time range selector (1h, 6h, 24h, 7d, 30d)
-- **Logs** — Real-time log viewer with search, level filter, source filter
+- **Logs** — Stored log lines (search, level filter); **purge** copy in DB by age or all
+- **HTTP Analytics** — Traffic breakdown, bad requests, blacklist editor, WHOIS links
 - **Uptime** — HTTP endpoint monitoring with response time graphs
-- **Settings** — Data retention, collection interval, log sources, notifications, alerts, account management
+- **Settings** — Retention, collection interval, log sources (with validation), Gmail/SMTP help, notifications, servers, alerts; **About** shows build version
 
 ## API
 
@@ -211,7 +213,12 @@ All endpoints require authentication (session cookie) except `/api/health` and `
 | GET | `/api/servers/:id/metrics?range=1h` | Get metrics |
 | GET | `/api/servers/:id/docker?range=1h` | Get Docker metrics |
 | POST | `/api/servers` | Create server |
-| GET | `/api/logs?server_id=X` | Query logs |
+| GET | `/api/logs?server_id=X` | Query ingested logs |
+| POST | `/api/logs/purge` | Purge ingested logs (CSRF) |
+| GET | `/api/servers/:id/access-stats` | HTTP analytics (`range`, `top_n`) |
+| GET | `/api/servers/:id/access-bad-requests` | Recent 4xx/5xx (`range`, `ip`, `limit`) |
+| GET | `/api/access-ip-policy` | IP blacklist JSON |
+| PUT | `/api/access-ip-policy` | Save blacklist (CSRF) |
 | GET | `/api/settings` | Get settings |
 | PUT | `/api/settings` | Update settings |
 | GET | `/api/detect` | Run auto-detection |
@@ -243,13 +250,19 @@ make lint
 make test
 ```
 
+## Changelog & versioning
+
+- **[CHANGELOG.md](CHANGELOG.md)** — User-facing changes per release; update **Unreleased** as you merge features, then add a `## [vX.Y.Z]` section before tagging.
+- **Runtime version** — `tracelog version` and `GET /api/health` → `version`. Development builds show `dev`; release binaries get the tag via **ldflags** (see below).
+
 ## Publishing a release (GitHub)
 
 Releases are built automatically with **[GoReleaser](https://goreleaser.com/)** when you push a **version tag**:
 
 ```bash
-git tag v0.1.0   # semver; must start with v
-git push origin v0.1.0
+# 1) Update CHANGELOG.md (move Unreleased → vX.Y.Z), commit
+git tag v0.2.0   # semver; must start with v
+git push origin v0.2.0
 ```
 
 Workflow [`.github/workflows/release.yml`](.github/workflows/release.yml) runs on `v*`, builds the embedded frontend, then uploads:

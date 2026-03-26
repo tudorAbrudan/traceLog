@@ -54,6 +54,9 @@ export const api = {
     if (opts.range) params.set('range', opts.range);
     return request('GET', `/logs?${params}`);
   },
+  /** Removes ingested log rows in TraceLog’s database (not files on the server disk). */
+  purgeIngestedLogs: (body: { server_id: string; mode: 'all' | 'older_than'; range?: string; source?: string }) =>
+    request('POST', '/logs/purge', body),
 
   // Log Sources
   listLogSources: () => request('GET', '/log-sources'),
@@ -86,8 +89,22 @@ export const api = {
   getProcessHistory: (id: string, range_: string = '1h') => request('GET', `/servers/${id}/processes?range=${range_}`),
 
   // Access Logs / HTTP Analytics
-  getAccessStats: (id: string, range_: string = '24h') => request('GET', `/servers/${id}/access-stats?range=${range_}`),
+  getAccessStats: (id: string, range_: string = '24h', topN?: number) => {
+    const q = new URLSearchParams({ range: range_ });
+    if (topN != null && topN > 0) q.set('top_n', String(topN));
+    return request('GET', `/servers/${id}/access-stats?${q}`);
+  },
   getRecentAccessLogs: (id: string) => request('GET', `/servers/${id}/access-logs`),
+  getAccessBadRequests: (id: string, opts: { range?: string; ip?: string; limit?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (opts.range) q.set('range', opts.range);
+    if (opts.ip) q.set('ip', opts.ip);
+    if (opts.limit) q.set('limit', String(opts.limit));
+    const suffix = q.toString() ? `?${q}` : '';
+    return request('GET', `/servers/${id}/access-bad-requests${suffix}`);
+  },
+  getAccessIPPolicy: () => request('GET', '/access-ip-policy'),
+  putAccessIPPolicy: (ips: string[]) => request('PUT', '/access-ip-policy', { ips }),
 
   // Detection
   detect: () => request('GET', '/detect'),

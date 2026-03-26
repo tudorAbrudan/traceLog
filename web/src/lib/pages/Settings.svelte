@@ -16,6 +16,8 @@
   let channels: any[] = [];
   let newChName = ''; let newChType = 'email'; let newChConfig = '';
 
+  let aboutVersion = '';
+
   // Servers
   let servers: any[] = [];
 
@@ -36,6 +38,22 @@
 
   const metrics = ['cpu_percent', 'mem_percent', 'disk_percent', 'load_1', 'load_5', 'load_15'];
 
+  /** JSON template for Gmail SMTP (matches hub EmailConfig: host, port, username, password, from, to, use_tls). */
+  const gmailConfigTemplate = `{
+  "host": "smtp.gmail.com",
+  "port": 587,
+  "username": "adresa.ta@gmail.com",
+  "password": "xxxx xxxx xxxx xxxx",
+  "from": "adresa.ta@gmail.com",
+  "to": "unde.primesti@example.com",
+  "use_tls": true
+}`;
+
+  function insertGmailTemplate() {
+    newChType = 'email';
+    newChConfig = gmailConfigTemplate.trim();
+  }
+
   onMount(async () => {
     try {
       const s = await api.getSettings();
@@ -46,6 +64,14 @@
 
   async function loadTab(tab: string) {
     activeTab = tab;
+    if (tab === 'about') {
+      try {
+        const h = await api.health();
+        aboutVersion = h?.version || 'unknown';
+      } catch {
+        aboutVersion = 'unknown';
+      }
+    }
     try {
       if (tab === 'logs') logSources = (await api.listLogSources()) || [];
       if (tab === 'notifications') channels = (await api.listNotificationChannels()) || [];
@@ -66,9 +92,14 @@
 
   // Log sources
   async function addLogSource() {
-    if (!newLogName || !newLogPath) return;
+    const name = newLogName.trim();
+    const path = newLogPath.trim();
+    if (!name || !path) {
+      alert('Enter a display name and an absolute file path (e.g. /var/log/nginx/access.log).');
+      return;
+    }
     try {
-      await api.createLogSource({ name: newLogName, path: newLogPath, format: newLogFormat, type: 'file', server_id: '', enabled: true });
+      await api.createLogSource({ name, path, format: newLogFormat, type: 'file', server_id: '', enabled: true });
       newLogName = ''; newLogPath = '';
       logSources = (await api.listLogSources()) || [];
     } catch (e: any) { alert('Failed: ' + e.message); }
@@ -94,7 +125,10 @@
 
   // Notification channels
   async function addChannel() {
-    if (!newChName || !newChConfig) return;
+    if (!newChName?.trim() || !newChConfig?.trim()) {
+      alert('Introdu un nume pentru canal și JSON-ul de configurare.');
+      return;
+    }
     try {
       await api.createNotificationChannel({ name: newChName, type: newChType, config: newChConfig });
       newChName = ''; newChConfig = '';
@@ -150,6 +184,7 @@
       {#if activeTab === 'general'}
         <div class="section">
           <h3>Data Retention</h3>
+          <p class="hint">Applies to metrics, Docker stats, <strong>ingested log lines</strong>, HTTP access rows, uptime results, alert history, and process metrics. Older data is removed automatically about every hour — not the same as the <strong>Logs</strong> page “Purge”, which clears stored lines on demand.</p>
           <div class="field">
             <label for="retention">Keep data for</label>
             <div class="range-input">
@@ -159,6 +194,7 @@
           </div>
           <div class="field">
             <label for="interval">Collection interval</label>
+            <p class="hint field-hint">How often agents send system (and related) metric samples to the hub. Lower values mean fresher charts and slightly more traffic.</p>
             <select id="interval" bind:value={collectionInterval}>
               <option value={5}>5 seconds</option>
               <option value={10}>10 seconds</option>
@@ -172,6 +208,7 @@
       {:else if activeTab === 'logs'}
         <div class="section">
           <h3>Log Sources</h3>
+          <p class="hint">Scan checks this server for usual paths (nginx, apache, syslog, etc.) and adds only files that exist. Format is set per file type (e.g. nginx for access logs).</p>
           <button class="btn-secondary" on:click={scanLogs}>Scan for common log files</button>
           <div class="add-form">
             <input type="text" bind:value={newLogName} placeholder="Name" />
@@ -183,6 +220,7 @@
             </select>
             <button class="btn-save" on:click={addLogSource}>Add</button>
           </div>
+          <p class="hint">Manual add: the file must exist on the machine running TraceLog. Nginx and apache formats are checked against the first lines of the file (access-log style). Use plain for error logs, app output, or syslog-style lines.</p>
           {#if logSources.length === 0}
             <p class="hint">No log sources configured. Click "Scan" or add manually above.</p>
           {:else}
@@ -203,6 +241,28 @@
       {:else if activeTab === 'notifications'}
         <div class="section">
           <h3>Notification Channels</h3>
+
+          <div class="notify-help">
+            <h4 class="notify-help-title">Gmail — exemplu și configurare</h4>
+            <p class="hint notify-help-lead">
+              Google nu permite trimiterea SMTP cu parola contului dacă ai verificare în doi pași activă.
+              Folosește o <strong>parolă pentru aplicații</strong> (App Password) în câmpul <code>password</code>.
+            </p>
+            <ol class="notify-steps">
+              <li>Deschide <a href="https://myaccount.google.com/security" target="_blank" rel="noopener noreferrer">Securitate cont Google</a> și asigură-te că <strong>Verificare în doi pași</strong> este activată.</li>
+              <li>Mergi la <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer">Parole pentru aplicații</a> (dacă nu apare, caută „App passwords” în setările contului).</li>
+              <li>Creează o parolă nouă (ex. aplicație: Mail, dispozitiv: Other → „TraceLog”), copiază cele 16 caractere și pune-le în JSON fără spații sau cu spațiile afișate de Google — ambele merg.</li>
+              <li><code>username</code> și <code>from</code> trebuie să fie adresa Gmail completă. <code>to</code> poate fi orice adresă la care vrei să primești alertele.</li>
+              <li>Păstrează <code>host</code>: <code>smtp.gmail.com</code>, <code>port</code>: <code>587</code>, <code>use_tls</code>: <code>true</code> (STARTTLS, ca în TraceLog).</li>
+            </ol>
+            <p class="hint">După ce salvezi canalul, folosește <strong>Test</strong> ca să verifici trimiterea.</p>
+            <div class="notify-example-row">
+              <pre class="notify-pre"><code>{gmailConfigTemplate.trim()}</code></pre>
+              <button type="button" class="btn-secondary notify-insert-btn" on:click={insertGmailTemplate}>Inserează exemplul în formular</button>
+            </div>
+          </div>
+
+          <p class="hint">Webhook: JSON body includes <code>subject</code>, <code>body</code>, and <code>time</code> (RFC3339). Optional <code>headers</code> map in config for auth tokens.</p>
           <div class="add-form">
             <input type="text" bind:value={newChName} placeholder="Channel name" />
             <select bind:value={newChType}>
@@ -210,7 +270,7 @@
               <option value="webhook">Webhook</option>
             </select>
             <textarea bind:value={newChConfig} placeholder={newChType === 'email'
-              ? '{"host":"smtp.example.com","port":587,"username":"...","password":"...","from":"...","to":"...","use_tls":true}'
+              ? 'JSON: host, port, username, password, from, to, use_tls — vezi exemplul Gmail de mai sus'
               : '{"url":"https://hooks.slack.com/...","method":"POST"}'}
             ></textarea>
             <button class="btn-save" on:click={addChannel}>Add Channel</button>
@@ -238,6 +298,7 @@
       {:else if activeTab === 'servers'}
         <div class="section">
           <h3>Connected Servers</h3>
+          <p class="hint">Each server is an agent (or the local node in <code>serve</code> mode). The <strong>API key</strong> is used by <code>tracelog agent --hub … --key …</code>. Deleting a server removes its metrics and stored logs for that server ID from TraceLog’s database.</p>
           {#if servers.length === 0}
             <p class="hint">No servers registered.</p>
           {:else}
@@ -259,6 +320,7 @@
       {:else if activeTab === 'alerts'}
         <div class="section">
           <h3>Alert Rules</h3>
+          <p class="hint">Evaluated on incoming system metrics. If the metric stays beyond the threshold for the <strong>duration</strong>, a notification is sent to the chosen channel (after cooldown). Pick a channel from <strong>Notifications</strong> first.</p>
           <div class="add-form alert-form">
             <select bind:value={newAlertMetric}>
               {#each metrics as m}<option value={m}>{m}</option>{/each}
@@ -309,10 +371,12 @@
       {:else if activeTab === 'about'}
         <div class="section">
           <h3>About TraceLog</h3>
+          <p class="hint">Released builds show the same version as <code>tracelog version</code> (set at compile time). <code>dev</code> means a local or non-release binary.</p>
           <div class="about-grid">
-            <div class="about-item"><span>Version</span><strong>dev</strong></div>
+            <div class="about-item"><span>Version</span><strong>{aboutVersion || '…'}</strong></div>
             <div class="about-item"><span>License</span><strong>MIT</strong></div>
-            <div class="about-item"><span>GitHub</span><a href="https://github.com/tudorAbrudan/tracelog" target="_blank">tudorAbrudan/tracelog</a></div>
+            <div class="about-item"><span>GitHub</span><a href="https://github.com/tudorAbrudan/tracelog" target="_blank" rel="noopener noreferrer">tudorAbrudan/tracelog</a></div>
+            <div class="about-item"><span>Docs</span><a href="https://tudorAbrudan.github.io/traceLog/guide/logs-http-analytics" target="_blank" rel="noopener noreferrer">Logs &amp; HTTP analytics</a></div>
           </div>
         </div>
       {/if}
@@ -332,6 +396,7 @@
   .section h3 { font-size: 1rem; margin: 0 0 0.75rem 0; color: var(--text-primary); }
   .field { margin-bottom: 1rem; }
   .field label { display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.3rem; }
+  .field-hint { margin-top: -0.2rem; margin-bottom: 0.4rem !important; }
   .range-input { display: flex; align-items: center; gap: 0.75rem; }
   .range-input input { flex: 1; }
   .range-input span { min-width: 60px; font-size: 0.85rem; color: var(--text-primary); }
@@ -343,6 +408,16 @@
   .btn-save { padding: 0.5rem 1.25rem; background: #238636; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.85rem; }
   .btn-secondary { padding: 0.5rem 1rem; background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-primary); border-radius: 8px; cursor: pointer; font-size: 0.85rem; margin-bottom: 1rem; }
   .hint { color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem; }
+  .notify-help { margin-bottom: 1.25rem; padding: 1rem 1.1rem; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 10px; }
+  .notify-help-title { font-size: 0.95rem; margin: 0 0 0.5rem 0; color: var(--text-primary); }
+  .notify-help-lead { margin-bottom: 0.75rem !important; }
+  .notify-steps { margin: 0 0 0.75rem 0; padding-left: 1.25rem; font-size: 0.82rem; color: var(--text-secondary); line-height: 1.5; }
+  .notify-steps li { margin-bottom: 0.4rem; }
+  .notify-steps a { color: var(--accent); }
+  .notify-example-row { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: flex-start; margin-top: 0.5rem; }
+  .notify-pre { flex: 1; min-width: 220px; margin: 0; padding: 0.65rem 0.8rem; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; overflow-x: auto; font-size: 0.75rem; line-height: 1.45; color: var(--text-primary); }
+  .notify-pre code { background: none; padding: 0; font-size: inherit; color: inherit; }
+  .notify-insert-btn { margin-bottom: 0 !important; align-self: center; white-space: nowrap; }
   code { background: var(--bg-primary); padding: 2px 6px; border-radius: 4px; font-size: 0.8rem; }
   .item-list { display: flex; flex-direction: column; gap: 0.5rem; }
   .item-row { display: flex; justify-content: space-between; align-items: center; padding: 0.75rem; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 8px; }

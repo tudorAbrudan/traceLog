@@ -266,10 +266,14 @@ func (h *Hub) registerRoutes() {
 
 	// Logs
 	h.mux.HandleFunc("GET /api/logs", auth(h.handleGetLogs))
+	h.mux.HandleFunc("POST /api/logs/purge", auth(csrf(h.handlePurgeLogs)))
 
 	// Access Logs / HTTP Analytics
 	h.mux.HandleFunc("GET /api/servers/{id}/access-stats", auth(h.handleAccessLogStats))
 	h.mux.HandleFunc("GET /api/servers/{id}/access-logs", auth(h.handleRecentAccessLogs))
+	h.mux.HandleFunc("GET /api/servers/{id}/access-bad-requests", auth(h.handleAccessBadRequests))
+	h.mux.HandleFunc("GET /api/access-ip-policy", auth(h.handleAccessIPPolicy))
+	h.mux.HandleFunc("PUT /api/access-ip-policy", auth(csrf(h.handleAccessIPPolicy)))
 
 	// Uptime checks
 	h.mux.HandleFunc("GET /api/uptime", auth(h.handleListUptimeChecks))

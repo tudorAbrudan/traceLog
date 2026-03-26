@@ -31,12 +31,12 @@ type CollectConfig struct {
 }
 
 type LogSource struct {
-	Path      string `yaml:"path,omitempty"`
-	Name      string `yaml:"name"`
-	Format    string `yaml:"format,omitempty"`
-	Type      string `yaml:"type"`
-	Container string `yaml:"container,omitempty"`
-	Enabled   bool   `yaml:"enabled"`
+	Path      string `json:"path,omitempty" yaml:"path,omitempty"`
+	Name      string `json:"name" yaml:"name"`
+	Format    string `json:"format,omitempty" yaml:"format,omitempty"`
+	Type      string `json:"type" yaml:"type"`
+	Container string `json:"container,omitempty" yaml:"container,omitempty"`
+	Enabled   bool   `json:"enabled" yaml:"enabled"`
 }
 
 func DefaultConfig() *Config {

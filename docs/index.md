@@ -23,7 +23,9 @@ features:
   - title: Docker Monitoring
     details: Track container metrics, status, and logs automatically.
   - title: Log Aggregation
-    details: Tail log files, parse nginx/apache access logs, search and filter.
+    details: Tail and validate log files; search stored lines; optional DB purge (files on disk unchanged).
+  - title: HTTP analytics
+    details: Top IPs and paths, bad requests, optional IP blacklist hints, WHOIS links.
   - title: Uptime Monitoring
     details: HTTP endpoint checks with response time tracking and alerts.
   - title: Smart Alerts

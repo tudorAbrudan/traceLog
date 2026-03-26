@@ -67,6 +67,37 @@ func (s *Store) QueryLogs(ctx context.Context, serverID string, opts LogQueryOpt
 	return result, nil
 }
 
+// DeleteIngestedLogs removes rows from the logs table (TraceLog’s copy), not files on disk.
+// If before is zero, all matching rows for the server are removed.
+// If before is non-zero, only rows with ts strictly before before are removed.
+// If source is non-empty, only that log source name is affected.
+func (s *Store) DeleteIngestedLogs(ctx context.Context, serverID, source string, before time.Time) (int64, error) {
+	var (
+		q    string
+		args []any
+	)
+	switch {
+	case source != "" && !before.IsZero():
+		q = `DELETE FROM logs WHERE server_id = ? AND source = ? AND ts < ?`
+		args = []any{serverID, source, before.UTC().Format(time.RFC3339)}
+	case source != "" && before.IsZero():
+		q = `DELETE FROM logs WHERE server_id = ? AND source = ?`
+		args = []any{serverID, source}
+	case source == "" && !before.IsZero():
+		q = `DELETE FROM logs WHERE server_id = ? AND ts < ?`
+		args = []any{serverID, before.UTC().Format(time.RFC3339)}
+	default:
+		q = `DELETE FROM logs WHERE server_id = ?`
+		args = []any{serverID}
+	}
+	res, err := s.db.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
 type LogQueryOpts struct {
 	Source string
 	Level  string
