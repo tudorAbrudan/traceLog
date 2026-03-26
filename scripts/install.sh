@@ -10,10 +10,12 @@
 # HTTPS (optional): set DNS A/AAAA to this host, then e.g.:
 #   sudo TRACELOG_DOMAIN=monitor.example.com TRACELOG_LETSENCRYPT_EMAIL=you@example.com bash scripts/install.sh
 #
-# Subpath on an existing site (e.g. https://example.com/tracelog/):
-#   sudo TRACELOG_URL_PREFIX=/tracelog bash scripts/install.sh
-# Then add inside your existing server { } block (SSL site):
+# Subpath on an existing site (e.g. https://cadourile.ro/tracelog/):
+#   sudo TRACELOG_URL_PREFIX=/tracelog TRACELOG_NGINX_SITE=cadourile.ro bash scripts/install.sh
+# Optional: TRACELOG_PUBLIC_DOMAIN=cadourile.ro (for installer banner; defaults to site file name if it looks like a hostname)
+# With TRACELOG_NGINX_SITE, the installer tries to add inside the 443 server { }:
 #   include /etc/nginx/snippets/tracelog-subpath-loc.conf;
+# Otherwise add that line manually to your SSL vhost.
 set -euo pipefail
 
 # Set by try_release_download when a release is found; default for messages only.
@@ -547,6 +549,80 @@ EOF
     ok "Wrote /etc/nginx/conf.d/tracelog-subpath-map.conf and /etc/nginx/snippets/tracelog-subpath-loc.conf"
 }
 
+# Insert include into the HTTPS (listen …443) server block matching the site name.
+# $1 = vhost filename (e.g. cadourile.ro) under sites-enabled or sites-available.
+inject_nginx_subpath_include_into_vhost() {
+    local site="$1"
+    local f=""
+    for d in /etc/nginx/sites-enabled /etc/nginx/sites-available; do
+        if [ -f "$d/$site" ]; then
+            f="$d/$site"
+            break
+        fi
+    done
+    if [ -z "$f" ]; then
+        warn "No nginx vhost file named $site under sites-enabled or sites-available."
+        return 1
+    fi
+
+    if sudo grep -qF 'tracelog-subpath-loc.conf' "$f"; then
+        ok "nginx vhost $f already includes TraceLog subpath snippet"
+        return 0
+    fi
+
+    local host_label="${TRACELOG_PUBLIC_DOMAIN:-$site}"
+    local host_grep_re
+    host_grep_re=$(printf '%s' "$host_label" | sed 's/\./\\./g')
+
+    local inc_line='    include /etc/nginx/snippets/tracelog-subpath-loc.conf;'
+    local bak="${f}.bak-tracelog-$(date +%s)"
+    sudo cp -a "$f" "$bak" || return 1
+
+    local tmp
+    tmp=$(mktemp)
+    local inserted=0
+    local found_listen=0
+    local lines_after_listen=0
+
+    while IFS= read -r line || [ -n "$line" ]; do
+        if echo "$line" | grep -qE 'listen[[:space:]]+(\[::\]:)?443([^0-9]|$)'; then
+            found_listen=1
+            lines_after_listen=0
+        fi
+        if [ "$found_listen" = 1 ]; then
+            lines_after_listen=$((lines_after_listen + 1))
+        fi
+        printf '%s\n' "$line"
+        if [ "$inserted" = 0 ] && [ "$found_listen" = 1 ] && echo "$line" | grep -q 'server_name' && echo "$line" | grep -qE "$host_grep_re"; then
+            printf '%s\n' "$inc_line"
+            inserted=1
+            found_listen=0
+        fi
+        if [ "$found_listen" = 1 ] && [ "$lines_after_listen" -gt 48 ]; then
+            found_listen=0
+        fi
+    done < <(sudo cat "$f") > "$tmp"
+
+    if [ "$inserted" != 1 ]; then
+        warn "Could not auto-insert include (no listen 443 + server_name matching ${host_label} in $f)."
+        rm -f "$tmp"
+        sudo rm -f "$bak"
+        return 1
+    fi
+
+    sudo mv "$tmp" "$f" || return 1
+    ok "Inserted TraceLog include into $f (backup: $bak)"
+    if sudo nginx -t 2>/dev/null; then
+        sudo systemctl reload nginx 2>/dev/null || sudo systemctl restart nginx
+        ok "nginx reloaded"
+        return 0
+    fi
+    warn "nginx -t failed after edit; restoring $f from backup"
+    sudo mv "$bak" "$f"
+    sudo nginx -t || true
+    return 1
+}
+
 # Subpath behind existing vhost (TRACELOG_URL_PREFIX=/tracelog)
 setup_nginx_subpath_only() {
     if [ "$OS" != "linux" ] || [ -z "${URL_PREFIX:-}" ]; then
@@ -557,18 +633,32 @@ setup_nginx_subpath_only() {
         return 1
     fi
     write_nginx_subpath_snippets
+
+    local inject_ok=0
+    if [ -n "${TRACELOG_NGINX_SITE:-}" ]; then
+        if inject_nginx_subpath_include_into_vhost "${TRACELOG_NGINX_SITE}"; then
+            inject_ok=1
+        fi
+    fi
+
     if sudo nginx -t; then
         sudo systemctl enable nginx 2>/dev/null || true
-        sudo systemctl reload nginx 2>/dev/null || sudo systemctl restart nginx
-        ok "nginx loaded TraceLog subpath map (conf.d)"
+        if [ "$inject_ok" != 1 ]; then
+            sudo systemctl reload nginx 2>/dev/null || sudo systemctl restart nginx
+            ok "nginx loaded TraceLog subpath map (conf.d)"
+        fi
     else
         warn "nginx -t failed; fix config then: sudo nginx -t && sudo systemctl reload nginx"
         return 1
     fi
-    echo ""
-    warn "Add this line inside your existing site server { } (e.g. cadourile.ro SSL block):"
-    info "  include /etc/nginx/snippets/tracelog-subpath-loc.conf;"
-    warn "Then run: sudo nginx -t && sudo systemctl reload nginx"
+
+    if [ "$inject_ok" != 1 ]; then
+        echo ""
+        warn "Add this line inside your HTTPS server { } for your site (after server_name is fine):"
+        info "  include /etc/nginx/snippets/tracelog-subpath-loc.conf;"
+        warn "Or re-run with: TRACELOG_NGINX_SITE=cadourile.ro (vhost filename under sites-enabled)"
+        warn "Then: sudo nginx -t && sudo systemctl reload nginx"
+    fi
 }
 
 # Production reverse proxy: nginx → 127.0.0.1:8090 (whole host, not subpath)
@@ -662,6 +752,15 @@ main() {
     check_firewall
     get_ip
 
+    local pub_host=""
+    pub_host="${TRACELOG_PUBLIC_DOMAIN:-}"
+    if [ -z "$pub_host" ] && [ -n "${TRACELOG_NGINX_SITE:-}" ] && [[ "${TRACELOG_NGINX_SITE}" == *.* ]]; then
+        pub_host="${TRACELOG_NGINX_SITE}"
+    fi
+    if [ -z "$pub_host" ] && [ -n "${TRACELOG_DOMAIN:-}" ]; then
+        pub_host="${TRACELOG_DOMAIN}"
+    fi
+
     echo ""
     echo -e "${CYAN}  ┌──────────────────────────────────────┐${NC}"
     if [ "$MODE" = "agent" ]; then
@@ -669,8 +768,14 @@ main() {
     else
         local url_msg=""
         if [ -n "${URL_PREFIX:-}" ]; then
-            echo -e "${CYAN}  │  ${GREEN}${BOLD}Open: https://YOUR_DOMAIN${URL_PREFIX}/${NC}${CYAN} (use your real domain)"
-            echo -e "${CYAN}  │  ${BOLD}After include + reload nginx (see above). Hub URL for agents: https://YOUR_DOMAIN${URL_PREFIX}${NC}${CYAN}"
+            if [ -n "$pub_host" ]; then
+                echo -e "${CYAN}  │  ${GREEN}${BOLD}Open: https://${pub_host}${URL_PREFIX}/${NC}${CYAN}"
+                echo -e "${CYAN}  │  ${BOLD}Hub URL for agents: https://${pub_host}${URL_PREFIX}${NC}${CYAN}"
+            else
+                echo -e "${CYAN}  │  ${GREEN}${BOLD}Open: https://YOUR_DOMAIN${URL_PREFIX}/${NC}${CYAN}"
+                echo -e "${CYAN}  │  ${BOLD}Set TRACELOG_PUBLIC_DOMAIN or TRACELOG_NGINX_SITE=cadourile.ro for a concrete URL.${NC}${CYAN}"
+                echo -e "${CYAN}  │  ${BOLD}Hub URL for agents: https://YOUR_DOMAIN${URL_PREFIX}${NC}${CYAN}"
+            fi
         elif [ "${PROD_PROXY}" = "1" ]; then
             if [ -n "${TRACELOG_DOMAIN:-}" ] && [ -f "/etc/letsencrypt/live/${TRACELOG_DOMAIN}/fullchain.pem" ]; then
                 url_msg="https://${TRACELOG_DOMAIN}/"

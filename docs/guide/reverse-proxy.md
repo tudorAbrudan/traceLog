@@ -53,17 +53,19 @@ Caddy automatically handles HTTPS certificates.
 
 Use this when another app already serves `/` on the same host (e.g. `cadourile.ro`).
 
-1. Run the installer with a path prefix (no trailing slash):
+1. Run the installer with a path prefix (no trailing slash). To **auto-edit** your SSL vhost (filename under `sites-enabled`, e.g. `cadourile.ro`):
 
    ```bash
-   sudo TRACELOG_URL_PREFIX=/tracelog bash scripts/install.sh
+   sudo TRACELOG_URL_PREFIX=/tracelog TRACELOG_NGINX_SITE=cadourile.ro bash scripts/install.sh
    ```
+
+   Optional: **`TRACELOG_PUBLIC_DOMAIN=cadourile.ro`** if the banner should show a hostname different from the vhost filename.
 
    Or set **`Environment=TRACELOG_URL_PREFIX=/tracelog`** and **`--url-prefix /tracelog`** on `tracelog serve` in systemd.
 
 2. The installer writes **`/etc/nginx/conf.d/tracelog-subpath-map.conf`** (WebSocket `map`) and **`/etc/nginx/snippets/tracelog-subpath-loc.conf`** (`location /tracelog/` → `http://127.0.0.1:8090/` with the path stripped).
 
-3. Inside your **existing** `server { }` for that domain (usually the HTTPS block), add:
+3. If you did **not** pass **`TRACELOG_NGINX_SITE`**, add inside your **existing** `server { }` for HTTPS:
 
    ```nginx
    include /etc/nginx/snippets/tracelog-subpath-loc.conf;

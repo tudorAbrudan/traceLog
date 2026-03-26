@@ -34,7 +34,7 @@ curl -sSL https://raw.githubusercontent.com/tudorAbrudan/tracelog/main/scripts/i
 
 On Linux the installer sets up **production-style** defaults: **nginx** proxies **HTTP (80)** to TraceLog on **127.0.0.1:8090** (port 8090 is not exposed publicly). Open **`http://your-server-ip/`** and log in (installer prints the initial `admin` password when it can). For **HTTPS**, point DNS at the host and run with `TRACELOG_DOMAIN=your.domain` and `TRACELOG_LETSENCRYPT_EMAIL=you@example.com` so **certbot** can obtain a certificate. To skip nginx and bind on all interfaces like a dev setup: `TRACELOG_NO_PROXY=1`.
 
-To serve TraceLog under a **path** on an existing site (e.g. **`https://example.com/tracelog/`**), run with **`TRACELOG_URL_PREFIX=/tracelog`**, then add **`include /etc/nginx/snippets/tracelog-subpath-loc.conf;`** inside your site’s `server { }` as printed by the installer. Remote agents use hub URL **`https://example.com/tracelog`**.
+To serve TraceLog under a **path** on an existing site (e.g. **`https://cadourile.ro/tracelog/`**), run with **`TRACELOG_URL_PREFIX=/tracelog`**. Optionally set **`TRACELOG_NGINX_SITE=cadourile.ro`** (vhost filename in `sites-enabled`) so the installer inserts the **`include /etc/nginx/snippets/tracelog-subpath-loc.conf;`** line into your **HTTPS** `server { }` and reloads nginx. Otherwise add that include manually. Remote agents use hub URL **`https://your-domain/tracelog`**.
 
 Use `sudo bash` if the script asks for privilege escalation (it uses `sudo` internally for system paths).
 
