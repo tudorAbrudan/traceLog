@@ -3,6 +3,7 @@
   import { get } from 'svelte/store';
   import { api } from '../api';
   import { contextServerId } from '../store';
+  import LoadingState from '../components/LoadingState.svelte';
 
   let servers: any[] = [];
   let selectedServer = '';
@@ -10,9 +11,11 @@
   let stats: any = null;
   let recentLogs: any[] = [];
   let loading = true;
+  let loadError = '';
   let blacklistText = '';
   let blacklistDirty = false;
   let savingBl = false;
+  let saveError = '';
   let badLogs: any[] = [];
   let badLoading = false;
   let badFilterIP = '';
@@ -56,7 +59,7 @@
           await loadData();
         }
       } catch (e) {
-        console.error(e);
+        loadError = (e as Error).message || 'Failed to load';
       } finally {
         loading = false;
       }
@@ -84,7 +87,7 @@
       await refreshBadRequests();
       await refreshSlowRequests();
     } catch (e) {
-      console.error(e);
+      loadError = (e as Error).message || 'Failed to load analytics';
     }
   }
 
@@ -99,7 +102,7 @@
       blacklistDirty = false;
       await loadData();
     } catch (e: any) {
-      alert('Save failed: ' + (e.message || e));
+      saveError = e.message || 'Save failed';
     } finally {
       savingBl = false;
     }
@@ -236,9 +239,8 @@
     </div>
   </div>
 
-  {#if loading}
-    <div class="status-msg">Loading analytics...</div>
-  {:else if !stats || stats.total_requests === 0}
+  <LoadingState {loading} error={loadError}>
+    {#if !stats || stats.total_requests === 0}
     <div class="status-msg">
       No HTTP request data in this range. Add your nginx (or apache) <strong>access</strong> log under Settings → Log Sources with format <strong>nginx</strong> (or apache), then <strong>restart TraceLog</strong> so the agent tails the file. Only requests logged <em>after</em> the restart are ingested; try hitting your site to generate new lines.
     </div>
@@ -333,6 +335,7 @@
         <button type="button" class="btn-export-bl" on:click={copyNginxDenySnippet}>Copy nginx deny snippet</button>
         <button type="button" class="btn-export-bl" on:click={downloadNginxDenySnippet}>Download .conf</button>
       </div>
+      {#if saveError}<p class="error-msg">{saveError}</p>{/if}
     </div>
 
     <div class="tables-row three">
@@ -552,6 +555,7 @@
       </div>
     {/if}
   {/if}
+  </LoadingState>
 </div>
 
 <style>
@@ -767,6 +771,7 @@
   .mini-whois:hover { text-decoration: underline; }
 
   .status-msg { text-align: center; padding: 4rem; color: var(--text-muted); }
+  .error-msg { color: var(--danger); font-size: 0.82rem; margin: 0.5rem 0; padding: 0.4rem 0.75rem; background: rgba(248,81,73,0.08); border: 1px solid rgba(248,81,73,0.25); border-radius: 6px; }
   code { background: var(--bg-primary); padding: 1px 5px; border-radius: 4px; font-size: 0.85em; }
   .doc-ref { margin-left: 0.35rem; color: var(--accent); font-size: inherit; }
 </style>

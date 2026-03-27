@@ -4,15 +4,18 @@
   import { api } from '../api';
   import ServerCard from '../components/ServerCard.svelte';
   import { contextServerId, currentPage, suppressSingleServerAutoOpen } from '../store';
+  import LoadingState from '../components/LoadingState.svelte';
 
   /** One auto-jump to the lone server per tab session; blocks stray Overview ticks from changing the route again. */
   const SINGLE_SERVER_AUTO_NAV_KEY = 'tracelog-single-server-auto-nav-done';
 
   let servers: any[] = [];
   let loading = true;
+  let listError = '';
   let showForm = false;
   let newName = '';
   let newHost = '';
+  let addError = '';
 
   /** After the first successful list fetch, auto-open runs at most once; later polls only refresh `servers`. */
   let autoNavResolved = false;
@@ -30,7 +33,8 @@
       const list = (await api.listServers()) || [];
       servers = list;
       return true;
-    } catch {
+    } catch (e) {
+      listError = (e as Error).message || 'Failed to load servers';
       return false;
     } finally {
       loading = false;
@@ -63,6 +67,7 @@
 
   async function addServer() {
     if (!newName) return;
+    addError = '';
     try {
       await api.createServer(newName, newHost);
       newName = ''; newHost = ''; showForm = false;
@@ -78,7 +83,7 @@
         }
       }
     } catch (e: any) {
-      alert('Failed: ' + e.message);
+      addError = e.message || 'Failed to create server';
     }
   }
 </script>
@@ -104,24 +109,25 @@
         </div>
         <button class="btn-save" on:click={addServer}>Create</button>
       </div>
+      {#if addError}<p class="error-msg">{addError}</p>{/if}
       <p class="hint">After creating, use the API key to connect a remote agent.</p>
     </div>
   {/if}
 
-  {#if loading}
-    <div class="loading">Loading...</div>
-  {:else if servers.length === 0}
-    <div class="empty">
-      <h3>No servers yet</h3>
-      <p>Your local server metrics are being collected. They'll appear here shortly.</p>
-    </div>
-  {:else}
-    <div class="server-grid">
-      {#each servers as server (server.id)}
-        <ServerCard {server} />
-      {/each}
-    </div>
-  {/if}
+  <LoadingState {loading} error={listError}>
+    {#if servers.length === 0}
+      <div class="empty">
+        <h3>No servers yet</h3>
+        <p>Your local server metrics are being collected. They'll appear here shortly.</p>
+      </div>
+    {:else}
+      <div class="server-grid">
+        {#each servers as server (server.id)}
+          <ServerCard {server} />
+        {/each}
+      </div>
+    {/if}
+  </LoadingState>
 </div>
 
 <style>
@@ -138,7 +144,8 @@
   .field input:focus { border-color: #58a6ff; }
   .btn-save { padding: 0.5rem 1.25rem; background: #238636; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.85rem; }
   .hint { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.75rem; }
+  .error-msg { color: var(--danger); font-size: 0.82rem; margin: 0.5rem 0 0; padding: 0.4rem 0.75rem; background: rgba(248,81,73,0.08); border: 1px solid rgba(248,81,73,0.25); border-radius: 6px; }
   .server-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1rem; }
-  .loading, .empty { text-align: center; padding: 4rem 2rem; color: var(--text-muted); }
+  .empty { text-align: center; padding: 4rem 2rem; color: var(--text-muted); }
   .empty h3 { color: var(--text-primary); margin-bottom: 0.5rem; }
 </style>

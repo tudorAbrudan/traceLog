@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api } from '../api';
+  import { fmtBytes } from '../utils/format';
 
   export let serverId = '';
   /** Same values as Logs page — filters loaded container output client-side (keyword heuristics). */
@@ -14,6 +15,7 @@
     | 'min_debug' = 'all';
 
   let dockerRows: any[] = [];
+  let metricsErr = '';
   let selectedContainer = '';
   let dockerLogs = '';
   let dockerLogsLoading = false;
@@ -26,7 +28,9 @@
     }
     try {
       dockerRows = await api.getDockerMetrics(serverId, '1h');
-    } catch {
+      metricsErr = '';
+    } catch (e) {
+      metricsErr = (e as Error).message || 'Failed to load container metrics';
       dockerRows = [];
     }
   }
@@ -44,14 +48,6 @@
     } finally {
       dockerLogsLoading = false;
     }
-  }
-
-  function fmtBytes(b: number): string {
-    if (b == null || !Number.isFinite(b) || b < 0) return '—';
-    if (b >= 1073741824) return (b / 1073741824).toFixed(1) + ' GB';
-    if (b >= 1048576) return (b / 1048576).toFixed(1) + ' MB';
-    if (b >= 1024) return (b / 1024).toFixed(1) + ' KB';
-    return b + ' B';
   }
 
   /** Memory use as % of container cgroup limit (not host RAM %). */
@@ -137,7 +133,11 @@
       <code>Load logs</code> runs <code>docker logs</code> on the agent host. The Logs page severity menu filters loaded output by keywords (not ingested DB levels).</span>
   </div>
   {#if dockerList.length === 0}
-    <p class="docker-empty">No container metrics yet. Enable Docker collection on the agent and wait for the next scrape.</p>
+    {#if metricsErr}
+      <p class="docker-empty docker-metrics-err">{metricsErr}</p>
+    {:else}
+      <p class="docker-empty">No container metrics yet. Enable Docker collection on the agent and wait for the next scrape.</p>
+    {/if}
   {:else}
     <div class="docker-stats-wrap">
       <table class="docker-stats-table">
@@ -237,6 +237,7 @@
     color: var(--text-muted);
     margin: 0;
   }
+  .docker-metrics-err { color: var(--danger); }
   .docker-stats-wrap {
     overflow-x: auto;
     margin-bottom: 0.75rem;

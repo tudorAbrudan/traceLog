@@ -4,6 +4,8 @@
   import Chart from '../components/Chart.svelte';
   import DockerLogsPanel from '../components/DockerLogsPanel.svelte';
   import { contextServerId, currentPage, suppressSingleServerAutoOpen } from '../store';
+  import { fmtBytes } from '../utils/format';
+  import LoadingState from '../components/LoadingState.svelte';
 
   export let serverId = '';
 
@@ -65,13 +67,6 @@
     currentPage.set('overview');
   }
 
-  function fmtBytes(b: number): string {
-    if (b >= 1073741824) return (b / 1073741824).toFixed(1) + ' GB';
-    if (b >= 1048576) return (b / 1048576).toFixed(1) + ' MB';
-    if (b >= 1024) return (b / 1024).toFixed(1) + ' KB';
-    return b + ' B';
-  }
-
   $: latest = metrics.length > 0 ? metrics[metrics.length - 1] : null;
   $: cpuPct = latest?.cpu_percent ?? 0;
   $: memPct = latest && latest.mem_total > 0 ? (latest.mem_used / latest.mem_total * 100) : 0;
@@ -121,52 +116,52 @@
     {/each}
   </div>
 
-  {#if loading && metrics.length === 0}
-    <div class="status-msg">Loading metrics...</div>
-  {:else if metrics.length === 0}
-    <div class="status-msg">No metrics data yet. Data will appear as it's collected.</div>
-  {:else}
-    <div class="charts-grid">
-      <div class="chart-card full">
-        <div class="card-head">
-          <h3>CPU Usage</h3>
-          <span class="card-val">{cpuPct.toFixed(1)}%</span>
+  <LoadingState loading={loading && metrics.length === 0}>
+    {#if metrics.length === 0}
+      <div class="status-msg">No metrics data yet. Data will appear as it's collected.</div>
+    {:else}
+      <div class="charts-grid">
+        <div class="chart-card full">
+          <div class="card-head">
+            <h3>CPU Usage</h3>
+            <span class="card-val">{cpuPct.toFixed(1)}%</span>
+          </div>
+          <Chart data={metrics} field="cpu_percent" unit="%" color="#58a6ff" label="CPU" />
         </div>
-        <Chart data={metrics} field="cpu_percent" unit="%" color="#58a6ff" label="CPU" />
-      </div>
 
-      <div class="chart-card">
-        <div class="card-head">
-          <h3>Memory</h3>
-          <span class="card-val">{memPct.toFixed(1)}%</span>
+        <div class="chart-card">
+          <div class="card-head">
+            <h3>Memory</h3>
+            <span class="card-val">{memPct.toFixed(1)}%</span>
+          </div>
+          <Chart data={metrics} field="mem_used" total="mem_total" unit="%" color="#bc8cff" label="Used" />
         </div>
-        <Chart data={metrics} field="mem_used" total="mem_total" unit="%" color="#bc8cff" label="Used" />
-      </div>
 
-      <div class="chart-card">
-        <div class="card-head">
-          <h3>Disk</h3>
-          <span class="card-val">{diskPct.toFixed(1)}%</span>
+        <div class="chart-card">
+          <div class="card-head">
+            <h3>Disk</h3>
+            <span class="card-val">{diskPct.toFixed(1)}%</span>
+          </div>
+          <Chart data={metrics} field="disk_used" total="disk_total" unit="%" color="#f0883e" label="Used" />
         </div>
-        <Chart data={metrics} field="disk_used" total="disk_total" unit="%" color="#f0883e" label="Used" />
-      </div>
 
-      <div class="chart-card">
-        <div class="card-head">
-          <h3>Network I/O</h3>
+        <div class="chart-card">
+          <div class="card-head">
+            <h3>Network I/O</h3>
+          </div>
+          <Chart data={metrics} field="net_rx_bytes" field2="net_tx_bytes" unit="bytes/s" color="#3fb950" color2="#f85149" label="RX" label2="TX" />
         </div>
-        <Chart data={metrics} field="net_rx_bytes" field2="net_tx_bytes" unit="bytes/s" color="#3fb950" color2="#f85149" label="RX" label2="TX" />
-      </div>
 
-      <div class="chart-card">
-        <div class="card-head">
-          <h3>Load Average</h3>
-          <span class="card-val">{latest?.load_1?.toFixed(2)} / {latest?.load_5?.toFixed(2)}</span>
+        <div class="chart-card">
+          <div class="card-head">
+            <h3>Load Average</h3>
+            <span class="card-val">{latest?.load_1?.toFixed(2)} / {latest?.load_5?.toFixed(2)}</span>
+          </div>
+          <Chart data={metrics} field="load_1" field2="load_5" unit="" color="#58a6ff" color2="#6e7681" label="1m" label2="5m" />
         </div>
-        <Chart data={metrics} field="load_1" field2="load_5" unit="" color="#58a6ff" color2="#6e7681" label="1m" label2="5m" />
       </div>
-    </div>
-  {/if}
+    {/if}
+  </LoadingState>
 
   <section id="tracelog-docker-section" class="docker-section" aria-label="Docker containers">
     <h3 class="docker-section-title">Docker</h3>

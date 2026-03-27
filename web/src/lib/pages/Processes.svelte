@@ -3,12 +3,15 @@
   import { get } from 'svelte/store';
   import { api } from '../api';
   import { contextServerId } from '../store';
+  import { fmtBytes } from '../utils/format';
+  import LoadingState from '../components/LoadingState.svelte';
 
   let servers: any[] = [];
   let selectedServer = '';
   let processes: any[] = [];
   let loading = true;
   let refreshing = false;
+  let loadError = '';
   let sortBy = 'cpu_percent';
   let sortDir: 'asc' | 'desc' = 'desc';
 
@@ -26,7 +29,7 @@
           await loadProcesses();
         }
       } catch (e) {
-        console.error('Failed to load servers', e);
+        loadError = (e as Error).message || 'Failed to load servers';
       } finally {
         loading = false;
       }
@@ -42,17 +45,10 @@
     try {
       processes = await api.getProcesses(selectedServer, true);
     } catch (e) {
-      console.error('Failed to load processes', e);
+      loadError = (e as Error).message || 'Failed to load processes';
     } finally {
       if (manual) refreshing = false;
     }
-  }
-
-  function fmtBytes(b: number): string {
-    if (b >= 1073741824) return (b / 1073741824).toFixed(1) + ' GB';
-    if (b >= 1048576) return (b / 1048576).toFixed(1) + ' MB';
-    if (b >= 1024) return (b / 1024).toFixed(1) + ' KB';
-    return b + ' B';
   }
 
   function sort(field: string) {
@@ -112,42 +108,42 @@
     </div>
   </div>
 
-  {#if loading}
-    <div class="status-msg">Loading processes...</div>
-  {:else if processes.length === 0}
-    <div class="status-msg">No process data yet. Data will appear as it's collected.</div>
-  {:else}
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th class="sortable" on:click={() => sort('pid')}>PID {sortBy === 'pid' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</th>
-            <th class="sortable" on:click={() => sort('name')}>Name {sortBy === 'name' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</th>
-            <th class="sortable num" on:click={() => sort('cpu_percent')}>CPU % {sortBy === 'cpu_percent' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</th>
-            <th class="sortable num" on:click={() => sort('mem_rss')}>Memory {sortBy === 'mem_rss' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</th>
-            <th class="num">Threads</th>
-            <th>Status</th>
-            <th>Command</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each sorted as proc}
+  <LoadingState {loading} error={loadError}>
+    {#if processes.length === 0}
+      <div class="status-msg">No process data yet. Data will appear as it's collected.</div>
+    {:else}
+      <div class="table-wrap">
+        <table>
+          <thead>
             <tr>
-              <td class="mono">{proc.pid}</td>
-              <td class="name">{proc.name}</td>
-              <td class="num" class:warn={proc.cpu_percent > 50} class:danger={proc.cpu_percent > 80}>
-                {proc.cpu_percent.toFixed(1)}%
-              </td>
-              <td class="num">{fmtBytes(proc.mem_rss)}</td>
-              <td class="num">{proc.threads}</td>
-              <td><span class="status-badge" class:running={proc.status === 'running' || proc.status === 'sleep'}>{proc.status}</span></td>
-              <td class="cmdline">{proc.cmdline || '—'}</td>
+              <th class="sortable" on:click={() => sort('pid')}>PID {sortBy === 'pid' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</th>
+              <th class="sortable" on:click={() => sort('name')}>Name {sortBy === 'name' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</th>
+              <th class="sortable num" on:click={() => sort('cpu_percent')}>CPU % {sortBy === 'cpu_percent' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</th>
+              <th class="sortable num" on:click={() => sort('mem_rss')}>Memory {sortBy === 'mem_rss' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</th>
+              <th class="num">Threads</th>
+              <th>Status</th>
+              <th>Command</th>
             </tr>
-          {/each}
-        </tbody>
-      </table>
-    </div>
-  {/if}
+          </thead>
+          <tbody>
+            {#each sorted as proc}
+              <tr>
+                <td class="mono">{proc.pid}</td>
+                <td class="name">{proc.name}</td>
+                <td class="num" class:warn={proc.cpu_percent > 50} class:danger={proc.cpu_percent > 80}>
+                  {proc.cpu_percent.toFixed(1)}%
+                </td>
+                <td class="num">{fmtBytes(proc.mem_rss)}</td>
+                <td class="num">{proc.threads}</td>
+                <td><span class="status-badge" class:running={proc.status === 'running' || proc.status === 'sleep'}>{proc.status}</span></td>
+                <td class="cmdline">{proc.cmdline || '—'}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
+  </LoadingState>
 </div>
 
 <style>

@@ -39,8 +39,15 @@ type Hub struct {
 	logIngestMu    sync.RWMutex
 	logIngestRules logIngestRules
 
+	mutedServers sync.Map // key: serverID string, value: struct{} — servers with alert notifications muted
+
 	spaOnce sync.Once
 	spaH    http.Handler
+}
+
+func (h *Hub) isServerMuted(id string) bool {
+	_, ok := h.mutedServers.Load(id)
+	return ok
 }
 
 func New(cfg *models.Config) (*Hub, error) {
@@ -78,6 +85,9 @@ func (h *Hub) notifyAlert(ctx context.Context, channelID string, alert *alerts.A
 	sid := alert.OriginServerID
 	if sid == "" {
 		sid = alert.ServerID
+	}
+	if h.isServerMuted(sid) {
+		return nil // alert notifications muted for this server
 	}
 	if err := h.store.InsertAlertHistory(ctx, alert.RuleID, sid, "fired", alert.Message); err != nil {
 		slog.Debug("alert history insert", "error", err)
@@ -239,6 +249,7 @@ func (h *Hub) Start(ctx context.Context) error {
 
 	// Load alert rules
 	h.loadAlertRules(ctx)
+	h.loadMutedServers(ctx)
 
 	// Load notification channels
 	h.loadNotificationChannels(ctx)
@@ -280,6 +291,17 @@ func (h *Hub) loadAlertRules(ctx context.Context) {
 	}
 	if len(rules) > 0 {
 		slog.Info("Loaded alert rules", "count", len(rules))
+	}
+}
+
+func (h *Hub) loadMutedServers(ctx context.Context) {
+	ids, err := h.store.ListMutedServerIDs(ctx)
+	if err != nil {
+		slog.Error("Failed to load muted servers", "error", err)
+		return
+	}
+	for _, id := range ids {
+		h.mutedServers.Store(id, struct{}{})
 	}
 }
 
@@ -340,6 +362,7 @@ func (h *Hub) registerRoutes() {
 	h.mux.HandleFunc("POST /api/servers", auth(csrf(h.handleCreateServer)))
 	h.mux.HandleFunc("PUT /api/servers/{id}", auth(csrf(h.handleUpdateServer)))
 	h.mux.HandleFunc("DELETE /api/servers/{id}", auth(csrf(h.handleDeleteServer)))
+	h.mux.HandleFunc("PATCH /api/servers/{id}/alerts-muted", auth(csrf(h.handleSetServerAlertsMuted)))
 
 	// Settings
 	h.mux.HandleFunc("GET /api/settings", auth(h.handleGetSettings))
@@ -373,6 +396,7 @@ func (h *Hub) registerRoutes() {
 	h.mux.HandleFunc("GET /api/alerts", auth(h.handleListAlertRules))
 	h.mux.HandleFunc("POST /api/alerts", auth(csrf(h.handleCreateAlertRule)))
 	h.mux.HandleFunc("DELETE /api/alerts/{id}", auth(csrf(h.handleDeleteAlertRule)))
+	h.mux.HandleFunc("PUT /api/alerts/{id}", auth(csrf(h.handleUpdateAlertRule)))
 
 	h.mux.HandleFunc("GET /api/alert-history", auth(h.handleListAlertHistory))
 

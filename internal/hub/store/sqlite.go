@@ -74,6 +74,8 @@ func (s *Store) migrate() error {
 		migration004,
 		migration005,
 		migration006,
+		migration007,
+		migration008,
 	}
 
 	for i := currentVersion; i < len(migrations); i++ {
@@ -281,6 +283,16 @@ const migration006 = `
 ALTER TABLE servers ADD COLUMN notes TEXT NOT NULL DEFAULT '';
 `
 
+const migration007 = `
+CREATE INDEX IF NOT EXISTS idx_alert_history_rule ON alert_history(rule_id);
+CREATE INDEX IF NOT EXISTS idx_alert_history_server ON alert_history(server_id);
+CREATE INDEX IF NOT EXISTS idx_access_logs_ip ON access_logs(ip);
+`
+
+const migration008 = `
+ALTER TABLE servers ADD COLUMN alerts_muted INTEGER NOT NULL DEFAULT 0;
+`
+
 func (s *Store) Backup(ctx context.Context, destPath string) error {
 	escaped := strings.ReplaceAll(destPath, "'", "''")
 	_, err := s.db.ExecContext(ctx, fmt.Sprintf("VACUUM INTO '%s'", escaped))
@@ -318,7 +330,7 @@ func (s *Store) runRetention() {
 
 	for _, table := range tables {
 		tsCol := "ts"
-		result, err := s.db.Exec(fmt.Sprintf("DELETE FROM %s WHERE %s < ?", table, tsCol), cutoff)
+		result, err := s.db.Exec(fmt.Sprintf("DELETE FROM %s WHERE %s < ?", table, tsCol), cutoff) //nolint:gosec // G201: table and tsCol come from a hardcoded slice, not user input
 		if err != nil {
 			slog.Error("Retention cleanup failed", "table", table, "error", err)
 			continue

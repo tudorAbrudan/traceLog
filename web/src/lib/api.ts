@@ -21,9 +21,14 @@ async function request(method: string, path: string, body?: unknown) {
     body: body ? JSON.stringify(body) : undefined,
   });
 
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-  return data;
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    if ((res.headers.get('Content-Type') || '').includes('application/json')) {
+      try { const j = await res.json(); if (j.error) msg = j.error; } catch { /* ignore */ }
+    }
+    throw new Error(msg);
+  }
+  return res.json();
 }
 
 export const api = {
@@ -91,6 +96,7 @@ export const api = {
   updateServer: (id: string, body: { name: string; host?: string; notes?: string }) =>
     request('PUT', `/servers/${id}`, body),
   deleteServer: (id: string) => request('DELETE', `/servers/${id}`),
+  setServerAlertsMuted: (id: string, muted: boolean) => request('PATCH', `/servers/${id}/alerts-muted`, { muted }),
 
   // Logs
   getLogs: (
@@ -118,7 +124,7 @@ export const api = {
 
   // Log Sources
   listLogSources: () => request('GET', '/log-sources'),
-  createLogSource: (data: any) => request('POST', '/log-sources', data),
+  createLogSource: (data: Record<string, unknown>) => request('POST', '/log-sources', data),
   updateLogSource: (id: string, data: { ingest_levels: string[] }) =>
     request('PUT', `/log-sources/${id}`, data),
   deleteLogSource: (id: string) => request('DELETE', `/log-sources/${id}`),
@@ -129,14 +135,15 @@ export const api = {
 
   // Uptime
   listUptimeChecks: () => request('GET', '/uptime'),
-  createUptimeCheck: (data: any) => request('POST', '/uptime', data),
+  createUptimeCheck: (data: Record<string, unknown>) => request('POST', '/uptime', data),
   deleteUptimeCheck: (id: string) => request('DELETE', `/uptime/${id}`),
   getUptimeResults: (id: string, range_: string = '24h') => request('GET', `/uptime/${id}/results?range=${range_}`),
 
   // Alerts
   listAlertRules: () => request('GET', '/alerts'),
-  createAlertRule: (data: any) => request('POST', '/alerts', data),
+  createAlertRule: (data: Record<string, unknown>) => request('POST', '/alerts', data),
   deleteAlertRule: (id: string) => request('DELETE', `/alerts/${id}`),
+  updateAlertRule: (id: string, data: Record<string, unknown>) => request('PUT', `/alerts/${id}`, data),
 
   listAlertHistory: (limit = 100) => request('GET', `/alert-history?limit=${limit}`),
 
@@ -147,7 +154,7 @@ export const api = {
 
   // Notifications
   listNotificationChannels: () => request('GET', '/notifications'),
-  createNotificationChannel: (data: any) => request('POST', '/notifications', data),
+  createNotificationChannel: (data: Record<string, unknown>) => request('POST', '/notifications', data),
   updateNotificationChannel: (id: string, data: { name: string; type: string; config: string }) =>
     request('PUT', `/notifications/${id}`, data),
   deleteNotificationChannel: (id: string) => request('DELETE', `/notifications/${id}`),

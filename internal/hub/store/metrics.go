@@ -98,7 +98,7 @@ func (s *Store) CreateServer(ctx context.Context, name, host string) (*models.Se
 func (s *Store) ListServers(ctx context.Context) ([]models.Server, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, name, COALESCE(host, ''), COALESCE(notes, ''), COALESCE(api_key, ''), status,
-			COALESCE(last_seen_at, ''), created_at
+			COALESCE(last_seen_at, ''), created_at, COALESCE(alerts_muted, 0)
 		FROM servers ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -109,11 +109,13 @@ func (s *Store) ListServers(ctx context.Context) ([]models.Server, error) {
 	for rows.Next() {
 		var srv models.Server
 		var lastSeen, created string
-		if err := rows.Scan(&srv.ID, &srv.Name, &srv.Host, &srv.Notes, &srv.APIKey, &srv.Status, &lastSeen, &created); err != nil {
+		var alertsMuted int
+		if err := rows.Scan(&srv.ID, &srv.Name, &srv.Host, &srv.Notes, &srv.APIKey, &srv.Status, &lastSeen, &created, &alertsMuted); err != nil {
 			return nil, err
 		}
 		srv.LastSeenAt, _ = time.Parse(time.RFC3339, lastSeen)
 		srv.CreatedAt, _ = time.Parse(time.RFC3339, created)
+		srv.AlertsMuted = alertsMuted == 1
 		servers = append(servers, srv)
 	}
 	return servers, rows.Err()
@@ -122,32 +124,36 @@ func (s *Store) ListServers(ctx context.Context) ([]models.Server, error) {
 func (s *Store) GetServer(ctx context.Context, id string) (*models.Server, error) {
 	var srv models.Server
 	var lastSeen, created string
+	var alertsMuted int
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, name, COALESCE(host, ''), COALESCE(notes, ''), COALESCE(api_key, ''), status,
-			COALESCE(last_seen_at, ''), created_at
+			COALESCE(last_seen_at, ''), created_at, COALESCE(alerts_muted, 0)
 		FROM servers WHERE id = ?`, id,
-	).Scan(&srv.ID, &srv.Name, &srv.Host, &srv.Notes, &srv.APIKey, &srv.Status, &lastSeen, &created)
+	).Scan(&srv.ID, &srv.Name, &srv.Host, &srv.Notes, &srv.APIKey, &srv.Status, &lastSeen, &created, &alertsMuted)
 	if err != nil {
 		return nil, fmt.Errorf("server %s not found: %w", id, err)
 	}
 	srv.LastSeenAt, _ = time.Parse(time.RFC3339, lastSeen)
 	srv.CreatedAt, _ = time.Parse(time.RFC3339, created)
+	srv.AlertsMuted = alertsMuted == 1
 	return &srv, nil
 }
 
 func (s *Store) GetServerByAPIKey(ctx context.Context, apiKey string) (*models.Server, error) {
 	var srv models.Server
 	var lastSeen, created string
+	var alertsMuted int
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, name, COALESCE(host, ''), COALESCE(notes, ''), api_key, status,
-			COALESCE(last_seen_at, ''), created_at
+			COALESCE(last_seen_at, ''), created_at, COALESCE(alerts_muted, 0)
 		FROM servers WHERE api_key = ?`, apiKey,
-	).Scan(&srv.ID, &srv.Name, &srv.Host, &srv.Notes, &srv.APIKey, &srv.Status, &lastSeen, &created)
+	).Scan(&srv.ID, &srv.Name, &srv.Host, &srv.Notes, &srv.APIKey, &srv.Status, &lastSeen, &created, &alertsMuted)
 	if err != nil {
 		return nil, err
 	}
 	srv.LastSeenAt, _ = time.Parse(time.RFC3339, lastSeen)
 	srv.CreatedAt, _ = time.Parse(time.RFC3339, created)
+	srv.AlertsMuted = alertsMuted == 1
 	return &srv, nil
 }
 
@@ -220,4 +226,32 @@ func generateID() (string, error) {
 		return "", fmt.Errorf("generate id: %w", err)
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// SetServerAlertsMuted enables or disables alert notification muting for a server.
+func (s *Store) SetServerAlertsMuted(ctx context.Context, id string, muted bool) error {
+	m := 0
+	if muted {
+		m = 1
+	}
+	_, err := s.db.ExecContext(ctx, `UPDATE servers SET alerts_muted = ? WHERE id = ?`, m, id)
+	return err
+}
+
+// ListMutedServerIDs returns the IDs of all servers with alerts_muted = 1.
+func (s *Store) ListMutedServerIDs(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id FROM servers WHERE alerts_muted = 1`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }

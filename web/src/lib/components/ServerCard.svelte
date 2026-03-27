@@ -5,6 +5,19 @@
 
   export let server: any;
 
+  let muted = server.alerts_muted ?? false;
+  let muteLoading = false;
+
+  async function toggleMute(e: MouseEvent) {
+    e.stopPropagation();
+    muteLoading = true;
+    try {
+      await api.setServerAlertsMuted(server.id, !muted);
+      muted = !muted;
+    } catch {}
+    muteLoading = false;
+  }
+
   let cpuPercent = 0;
   let memPercent = 0;
   let diskPercent = 0;
@@ -87,6 +100,13 @@
 
   <div class="meta">
     <span>Last seen: {timeSince(server.last_seen_at)}</span>
+    <span role="button" tabindex="0" class="mute-btn" class:muted
+      on:click={toggleMute}
+      on:keydown={(e) => e.key === 'Enter' && toggleMute(e as unknown as MouseEvent)}
+      aria-label={muted ? 'Alerts muted — click to unmute' : 'Click to mute alert notifications'}
+      title={muted ? 'Alerts muted — click to unmute' : 'Click to mute alert notifications'}>
+      {muted ? '🔕 Muted' : '🔔'}
+    </span>
   </div>
 </button>
 
@@ -111,5 +131,18 @@
   .bar-track { flex: 1; height: 6px; background: var(--bg-primary); border-radius: 3px; overflow: hidden; }
   .bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
   .bar-value { width: 32px; text-align: right; font-size: 0.7rem; color: var(--text-secondary); }
-  .meta { font-size: 0.75rem; color: var(--text-muted); }
+  .meta { font-size: 0.75rem; color: var(--text-muted); display: flex; align-items: center; gap: 0.5rem; }
+  .mute-btn {
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 1px 6px;
+    font-size: 0.7rem;
+    cursor: pointer;
+    color: var(--text-muted);
+    transition: border-color 0.15s;
+  }
+  .mute-btn:hover { border-color: var(--border); }
+  .mute-btn.muted { color: var(--warning, #d29922); }
+  .mute-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>

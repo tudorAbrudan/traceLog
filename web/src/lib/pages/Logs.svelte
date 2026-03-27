@@ -3,6 +3,7 @@
   import { get } from 'svelte/store';
   import { api } from '../api';
   import { contextServerId, currentPage } from '../store';
+  import LoadingState from '../components/LoadingState.svelte';
 
   let logs: any[] = [];
   let servers: any[] = [];
@@ -19,8 +20,10 @@
     | 'min_debug';
   let logFilter: LogFilter = 'all';
   let loading = false;
+  let loadError = '';
   let autoRefresh = true;
   let intervalId: any;
+  let purgeMsg = '';
   /** What to remove from TraceLog DB (not files on disk). */
   let purgePlan: 'all' | '24h' | '7d' | '30d' = '24h';
   let purgeSource = '';
@@ -67,8 +70,8 @@
           }
           await fetchLogs();
         }
-      } catch {
-        /* ignore */
+      } catch (e) {
+        loadError = (e as Error).message || 'Failed to load';
       }
     })();
 
@@ -94,7 +97,8 @@
 
       const result = await api.getLogs(selectedServer, q);
       logs = result || [];
-    } catch {
+    } catch (e) {
+      loadError = (e as Error).message || 'Failed to fetch logs';
       logs = [];
     } finally {
       loading = false;
@@ -224,10 +228,10 @@
       if (src) body.source = src;
 
       const r = await api.purgeIngestedLogs(body);
-      alert(`Removed ${r.deleted ?? 0} stored log row(s).`);
+      purgeMsg = `Removed ${r.deleted ?? 0} stored log row(s).`;
       await fetchLogs();
     } catch (e: any) {
-      alert('Purge failed: ' + e.message);
+      purgeMsg = 'Purge failed: ' + (e.message || String(e));
     } finally {
       purging = false;
     }
@@ -307,13 +311,13 @@
       <button type="button" class="btn-purge" disabled={purging || !selectedServer} on:click={purgeStoredLogs}>
         {purging ? '…' : 'Purge'}
       </button>
+      {#if purgeMsg}<span class="purge-result" class:purge-err={purgeMsg.startsWith('Purge failed')}>{purgeMsg}</span>{/if}
     </div>
   </div>
 
   <div class="log-viewer">
-    {#if loading && logs.length === 0}
-      <div class="status-msg">Loading...</div>
-    {:else if logs.length === 0}
+    <LoadingState loading={loading && logs.length === 0} error={loadError}>
+    {#if logs.length === 0}
       <div class="status-msg">No logs found. Configure log sources in Settings.</div>
     {:else}
       <div class="log-table">
@@ -413,6 +417,7 @@
         {/if}
       </div>
     {/if}
+    </LoadingState>
   </div>
 </div>
 
@@ -464,6 +469,8 @@
     border-radius: 6px; color: var(--text-primary); font-size: 0.85rem;
   }
   .auto-label { font-size: 0.8rem; color: var(--text-muted); display: flex; align-items: center; gap: 0.25rem; }
+  .purge-result { font-size: 0.8rem; color: #3fb950; }
+  .purge-err { color: var(--danger); }
   .log-viewer {
     background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px;
     min-height: 400px; overflow: auto; max-height: calc(100vh - 180px);

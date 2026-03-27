@@ -4,6 +4,23 @@ All notable changes to TraceLog are documented here. The format is loosely based
 
 ## [Unreleased]
 
+## [v0.2.14] - 2026-03-27
+
+### Added
+
+- **Per-server alert muting:** toggle alert notifications on/off for individual servers from the Overview server cards (`alerts_muted` column, DB migration 008). API: `PATCH /api/servers/{id}/alerts-muted`. Muted state is loaded at hub startup and respected by `notifyAlert`.
+- **Alert rule editing:** `PUT /api/alerts/{id}` endpoint; `api.updateAlertRule` on the frontend.
+- **DB performance indexes** (migration 007): `idx_alert_history_rule`, `idx_alert_history_server`, `idx_access_logs_ip`.
+
+### Changed
+
+- **Error handling across the UI:** API errors are now surfaced inline (no more `alert()` / silent `console.error`) in Overview, Logs, HTTP Analytics, Processes, DockerLogsPanel, and ServerDetail — using a shared `LoadingState` component.
+- **Purge feedback in Logs:** result message shown inline instead of `alert()`.
+- **`api.ts` request helper:** only parses response JSON as an error body when `Content-Type` is `application/json`; successful responses no longer attempt a double-parse.
+- **TypeScript:** tightened `any` types to `Record<string, unknown>` in `createLogSource`, `createUptimeCheck`, `createAlertRule`, `createNotificationChannel`.
+- **`fmtBytes` utility:** extracted to `web/src/lib/utils/format.ts`; removed local copies from DockerLogsPanel, Processes, and ServerDetail.
+- **gosec G201 suppression:** `sqlite.go` retention cleanup now carries `//nolint:gosec` comment explaining the hardcoded table/column source.
+
 ## [v0.2.13] - 2026-03-27
 
 ### Added

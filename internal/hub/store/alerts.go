@@ -63,3 +63,24 @@ func (s *Store) DeleteAlertRule(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM alert_rules WHERE id = ?`, id)
 	return err
 }
+
+func (s *Store) UpdateAlertRule(ctx context.Context, r *alerts.Rule) error {
+	enabled := 0
+	if r.Enabled {
+		enabled = 1
+	}
+	cooldownMin := r.CooldownS / 60
+	if cooldownMin == 0 {
+		cooldownMin = 30
+	}
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE alert_rules
+		 SET server_id = ?, metric = ?, operator = ?, threshold = ?,
+		     duration_seconds = ?, cooldown_minutes = ?, notify_channels = ?,
+		     docker_container = ?, enabled = ?
+		 WHERE id = ?`,
+		r.ServerID, r.Metric, r.Operator, r.Threshold, r.DurationS, cooldownMin,
+		r.ChannelID, r.DockerContainer, enabled, r.ID,
+	)
+	return err
+}
