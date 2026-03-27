@@ -271,6 +271,8 @@ func (s *Store) GetAccessLogTopIPCounts(ctx context.Context, serverID string, si
 }
 
 // QueryAccessBadRequests returns recent rows with status_code >= 400, optionally filtered by IP.
+//
+//nolint:gosec // G202: pathCond from accessLogExcludeHubUIPrefixSQL only (fixed SQL + ?-bound prefix args).
 func (s *Store) QueryAccessBadRequests(ctx context.Context, serverID string, since time.Time, ip string, limit int, excludeHubPathPrefix string) ([]models.AccessLogEntry, error) {
 	if limit <= 0 {
 		limit = 100
@@ -322,6 +324,7 @@ func (s *Store) QueryAccessBadRequests(ctx context.Context, serverID string, sin
 	return result, rows.Err()
 }
 
+//nolint:gosec // G202: pathCond from accessLogExcludeHubUIPrefixSQL only (fixed SQL + ?-bound prefix args).
 func (s *Store) GetRecentAccessLogs(ctx context.Context, serverID string, limit int, excludeHubPathPrefix string) ([]models.AccessLogEntry, error) {
 	pathCond, pathArgs := accessLogExcludeHubUIPrefixSQL(excludeHubPathPrefix)
 	args := append([]any{serverID}, pathArgs...)

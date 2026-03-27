@@ -416,7 +416,7 @@ func TestListLogSourcesForAgentServer(t *testing.T) {
 	}
 
 	f := filepath.Join(t.TempDir(), "app.log")
-	if err := os.WriteFile(f, []byte("x\n"), 0o644); err != nil {
+	if err := os.WriteFile(f, []byte("x\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

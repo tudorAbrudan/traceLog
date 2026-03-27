@@ -4,6 +4,12 @@ All notable changes to TraceLog are documented here. The format is loosely based
 
 ## [Unreleased]
 
+## [v0.2.12] - 2026-03-27
+
+### Fixed
+
+- **CI / lint (gosec):** document **`//nolint:gosec` (G202)** on **`QueryAccessBadRequests`** and **`GetRecentAccessLogs`** in `accesslogs.go` — dynamic `WHERE` uses only `accessLogExcludeHubUIPrefixSQL` fragments with bound args. **`store_test.go`:** test temp log file written with **`0o600`** (G306).
+
 ## [v0.2.11] - 2026-03-27
 
 ### Added
