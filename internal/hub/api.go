@@ -630,6 +630,62 @@ func (h *Hub) handleDeleteAlertRule(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+func (h *Hub) handleListLogAlertSilences(w http.ResponseWriter, r *http.Request) {
+	list, err := h.store.ListLogAlertSilences(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to list log alert silences: %v", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+func (h *Hub) handleCreateLogAlertSilence(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ServerID   string `json:"server_id"`
+		Pattern    string `json:"pattern"`
+		RuleMetric string `json:"rule_metric"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	rm := strings.TrimSpace(body.RuleMetric)
+	if rm != "" {
+		switch rm {
+		case "log_critical", "log_error", "log_warn":
+		default:
+			writeError(w, http.StatusBadRequest, "rule_metric must be empty or one of log_critical, log_error, log_warn")
+			return
+		}
+	}
+	sid := strings.TrimSpace(body.ServerID)
+	if sid != "" {
+		if _, err := h.store.GetServer(r.Context(), sid); err != nil {
+			writeError(w, http.StatusBadRequest, "Unknown server_id")
+			return
+		}
+	}
+	rec := &store.LogAlertSilence{
+		ServerID:   sid,
+		Pattern:    body.Pattern,
+		RuleMetric: rm,
+		Enabled:    true,
+	}
+	if err := h.store.CreateLogAlertSilence(r.Context(), rec); err != nil {
+		writeError(w, http.StatusBadRequest, "%v", err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, rec)
+}
+
+func (h *Hub) handleDeleteLogAlertSilence(w http.ResponseWriter, r *http.Request) {
+	if err := h.store.DeleteLogAlertSilence(r.Context(), r.PathValue("id")); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to delete silence")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
 // --- Notification Channels ---
 
 func (h *Hub) handleListNotificationChannels(w http.ResponseWriter, r *http.Request) {

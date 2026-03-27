@@ -134,6 +134,11 @@ export const api = {
   createAlertRule: (data: any) => request('POST', '/alerts', data),
   deleteAlertRule: (id: string) => request('DELETE', `/alerts/${id}`),
 
+  listLogAlertSilences: () => request('GET', '/log-alert-silences'),
+  createLogAlertSilence: (data: { pattern: string; server_id?: string; rule_metric?: string }) =>
+    request('POST', '/log-alert-silences', data),
+  deleteLogAlertSilence: (id: string) => request('DELETE', `/log-alert-silences/${id}`),
+
   // Notifications
   listNotificationChannels: () => request('GET', '/notifications'),
   createNotificationChannel: (data: any) => request('POST', '/notifications', data),

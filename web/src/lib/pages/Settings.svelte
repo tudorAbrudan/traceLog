@@ -27,6 +27,11 @@
 
   // Alerts
   let alertRules: any[] = [];
+  /** Substring silences for ingested log alert notifications (Settings → Alerts). */
+  let logSilences: any[] = [];
+  let newSilencePattern = '';
+  let newSilenceServerId = '';
+  let newSilenceRuleMetric = '';
   let newAlertMetric = 'cpu_percent'; let newAlertOp = '>'; let newAlertThreshold = 90;
   let newAlertDuration = 300; let newAlertChannel = '';
   /** Cooldown for log-based alerts (seconds). */
@@ -95,6 +100,8 @@
       if (tab === 'alerts') {
         alertRules = (await api.listAlertRules()) || [];
         channels = (await api.listNotificationChannels()) || [];
+        logSilences = (await api.listLogAlertSilences()) || [];
+        servers = (await api.listServers()) || [];
       }
     } catch {}
   }
@@ -189,6 +196,43 @@
   async function removeAlert(id: string) {
     await api.deleteAlertRule(id);
     alertRules = (await api.listAlertRules()) || [];
+  }
+
+  async function addLogSilence() {
+    const pattern = newSilencePattern.trim();
+    if (!pattern) {
+      alert('Enter a text pattern (case-insensitive substring of the log message).');
+      return;
+    }
+    try {
+      await api.createLogAlertSilence({
+        pattern,
+        server_id: newSilenceServerId.trim() || undefined,
+        rule_metric: newSilenceRuleMetric.trim() || undefined,
+      });
+      newSilencePattern = '';
+      newSilenceServerId = '';
+      newSilenceRuleMetric = '';
+      logSilences = (await api.listLogAlertSilences()) || [];
+    } catch (e: any) {
+      alert('Failed: ' + e.message);
+    }
+  }
+
+  async function removeLogSilence(id: string) {
+    await api.deleteLogAlertSilence(id);
+    logSilences = (await api.listLogAlertSilences()) || [];
+  }
+
+  function silenceServerLabel(sid: string): string {
+    if (!sid) return 'All servers';
+    const s = servers.find((x) => x.id === sid);
+    return s ? `${s.name} (${sid.slice(0, 8)}…)` : sid;
+  }
+
+  function silenceRuleLabel(metric: string): string {
+    if (!metric) return 'All log alert rules';
+    return logAlertMetrics.find((x) => x.id === metric)?.label ?? metric;
   }
 </script>
 
@@ -413,6 +457,42 @@
           {/if}
         </div>
 
+        <div class="section silence-section">
+          <h3>Log alert silences</h3>
+          <p class="hint">
+            When an ingested line would trigger a <strong>log-based</strong> alert, matching silences skip the notification (line is still stored). Match is case-insensitive substring on the message. Leave server or rule empty to apply to all.
+          </p>
+          <div class="add-form silence-form">
+            <input type="text" bind:value={newSilencePattern} placeholder="Substring e.g. document not found" class="silence-pattern-input" />
+            <select bind:value={newSilenceServerId} class="silence-select">
+              <option value="">All servers</option>
+              {#each servers as srv (srv.id)}
+                <option value={srv.id}>{srv.name}</option>
+              {/each}
+            </select>
+            <select bind:value={newSilenceRuleMetric} class="silence-select">
+              <option value="">All log rules</option>
+              {#each logAlertMetrics as lm}<option value={lm.id}>{lm.label}</option>{/each}
+            </select>
+            <button type="button" class="btn-save" on:click={addLogSilence}>Add silence</button>
+          </div>
+          {#if logSilences.length === 0}
+            <p class="hint">No silences. Noisy recurring lines can be muted here without turning off alerts entirely.</p>
+          {:else}
+            <div class="item-list">
+              {#each logSilences as s (s.id)}
+                <div class="item-row">
+                  <div>
+                    <strong class="silence-pattern">{s.pattern}</strong>
+                    <span class="item-detail">{silenceServerLabel(s.server_id)} · {silenceRuleLabel(s.rule_metric)}</span>
+                  </div>
+                  <button type="button" class="btn-delete" on:click={() => removeLogSilence(s.id)}>Delete</button>
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </div>
+
       {:else if activeTab === 'account'}
         <div class="section">
           <h3>Account</h3>
@@ -486,6 +566,10 @@
   .settings-nav button.active { background: var(--bg-secondary); color: var(--text-primary); font-weight: 600; }
   .settings-content { flex: 1; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem; }
   .section h3 { font-size: 1rem; margin: 0 0 0.75rem 0; color: var(--text-primary); }
+  .silence-section { margin-top: 1.75rem; padding-top: 1.25rem; border-top: 1px solid var(--border); }
+  .silence-form .silence-pattern-input { min-width: 200px; flex: 1; max-width: 420px; }
+  .silence-form .silence-select { min-width: 160px; }
+  .silence-pattern { word-break: break-word; }
   .subhead { font-size: 0.9rem; margin: 1.25rem 0 0.5rem 0; color: var(--text-primary); font-weight: 600; }
   .export-row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-top: 0.5rem; }
   .export-pass {

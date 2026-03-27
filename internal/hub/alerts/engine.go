@@ -35,6 +35,9 @@ type Alert struct {
 
 type NotifyFunc func(ctx context.Context, channelID string, alert *Alert) error
 
+// LogSilenceFn returns true if notifications for this log line and rule should be suppressed.
+type LogSilenceFn func(serverID, level, message, ruleMetric string) bool
+
 type Engine struct {
 	mu          sync.RWMutex
 	rules       map[string]*Rule
@@ -106,7 +109,7 @@ func (e *Engine) Evaluate(ctx context.Context, serverID string, metrics *models.
 }
 
 // EvaluateLog runs log-based rules when a line is stored (any source: files, apache, docker→ingested, etc.).
-func (e *Engine) EvaluateLog(ctx context.Context, serverID, level, source, message string) {
+func (e *Engine) EvaluateLog(ctx context.Context, serverID, level, source, message string, silence LogSilenceFn) {
 	var matches []*Rule
 	e.mu.RLock()
 	for _, rule := range e.rules {
@@ -117,6 +120,9 @@ func (e *Engine) EvaluateLog(ctx context.Context, serverID, level, source, messa
 			continue
 		}
 		if !IsLogMetricRule(rule.Metric) || !LogLevelMatches(rule.Metric, level) {
+			continue
+		}
+		if silence != nil && silence(serverID, level, message, rule.Metric) {
 			continue
 		}
 		r := rule

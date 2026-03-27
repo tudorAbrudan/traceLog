@@ -24,6 +24,11 @@
     try {
       await api.logout();
     } catch {}
+    try {
+      sessionStorage.removeItem('tracelog-current-page');
+    } catch {
+      /* ignore */
+    }
     window.location.reload();
   }
 </script>
@@ -38,7 +43,7 @@
       <button
         class:active={$currentPage === item.id}
         on:click={() => {
-          if (item.id === 'overview') suppressSingleServerAutoOpen.set(true);
+          suppressSingleServerAutoOpen.set(true);
           currentPage.set(item.id);
         }}
       >

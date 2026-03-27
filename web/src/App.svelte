@@ -1,7 +1,16 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { get } from 'svelte/store';
   import { api } from './lib/api';
   import { user, isAuthenticated, currentPage, navDrawerOpen } from './lib/store';
+
+  const PAGE_STORAGE_KEY = 'tracelog-current-page';
+  const KNOWN_TOP_PAGES = new Set(['overview', 'processes', 'logs', 'http', 'uptime', 'settings']);
+
+  function isPersistablePage(v: string): boolean {
+    if (KNOWN_TOP_PAGES.has(v)) return true;
+    return /^server:[a-zA-Z0-9_-]{4,128}$/.test(v);
+  }
 
   import Login from './lib/pages/Login.svelte';
   import SetupWizard from './lib/pages/SetupWizard.svelte';
@@ -25,6 +34,27 @@
     mq.addEventListener('change', closeDrawer);
     closeDrawer();
 
+    const unsubPersist = currentPage.subscribe((v) => {
+      if (get(isAuthenticated) && isPersistablePage(v)) {
+        try {
+          sessionStorage.setItem(PAGE_STORAGE_KEY, v);
+        } catch {
+          /* ignore quota / private mode */
+        }
+      }
+    });
+    const unsubAuth = isAuthenticated.subscribe((auth) => {
+      if (!auth) return;
+      try {
+        const raw = sessionStorage.getItem(PAGE_STORAGE_KEY);
+        if (raw && isPersistablePage(raw)) {
+          currentPage.set(raw);
+        }
+      } catch {
+        /* ignore */
+      }
+    });
+
     try {
       const health = await api.health();
       if (!health.setup_done) {
@@ -47,7 +77,11 @@
       checking = false;
     }
 
-    return () => mq.removeEventListener('change', closeDrawer);
+    return () => {
+      mq.removeEventListener('change', closeDrawer);
+      unsubPersist();
+      unsubAuth();
+    };
   });
 
   function getServerId(page: string): string {

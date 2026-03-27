@@ -11,6 +11,9 @@
   let newName = '';
   let newHost = '';
 
+  /** Only decide auto-open once per Overview mount; never from the 10s poll (avoids surprise redirects). */
+  let autoNavResolved = false;
+
   onMount(async () => {
     await loadServers();
 
@@ -22,10 +25,17 @@
     try {
       const list = (await api.listServers()) || [];
       servers = list;
-      if (list.length === 1 && !get(suppressSingleServerAutoOpen)) {
-        currentPage.set('server:' + list[0].id);
+      if (!autoNavResolved) {
+        autoNavResolved = true;
+        if (list.length === 1 && !get(suppressSingleServerAutoOpen)) {
+          currentPage.set('server:' + list[0].id);
+        }
       }
-    } catch {} finally { loading = false; }
+    } catch {
+      /* keep autoNavResolved false so a later poll can still auto-open after a failed first fetch */
+    } finally {
+      loading = false;
+    }
   }
 
   async function addServer() {
@@ -34,6 +44,9 @@
       await api.createServer(newName, newHost);
       newName = ''; newHost = ''; showForm = false;
       await loadServers();
+      if (servers.length === 1 && !get(suppressSingleServerAutoOpen)) {
+        currentPage.set('server:' + servers[0].id);
+      }
     } catch (e: any) {
       alert('Failed: ' + e.message);
     }

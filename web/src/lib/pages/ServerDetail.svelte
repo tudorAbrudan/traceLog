@@ -27,15 +27,6 @@
         api.getServer(serverId),
         api.getMetrics(serverId, range_),
       ]);
-      if (server?.host === 'localhost') {
-        try {
-          dockerRows = await api.getDockerMetrics(serverId, '1h');
-        } catch {
-          dockerRows = [];
-        }
-      } else {
-        dockerRows = [];
-      }
     } catch (e) {
       console.error('Failed to load server:', e);
     } finally {

@@ -119,7 +119,10 @@ func (h *Hub) IngestLog(ctx context.Context, entry *models.LogEntry) error {
 	}
 	h.ingestLog.Add(1)
 	if h.alerts != nil {
-		h.alerts.EvaluateLog(ctx, entry.ServerID, entry.Level, entry.Source, entry.Message)
+		h.alerts.EvaluateLog(ctx, entry.ServerID, entry.Level, entry.Source, entry.Message, func(sid, lvl, msg, ruleM string) bool {
+			ok, err := h.store.IsLogAlertSilenced(ctx, sid, msg, ruleM)
+			return err == nil && ok
+		})
 	}
 	return nil
 }
@@ -289,6 +292,10 @@ func (h *Hub) registerRoutes() {
 	h.mux.HandleFunc("GET /api/alerts", auth(h.handleListAlertRules))
 	h.mux.HandleFunc("POST /api/alerts", auth(csrf(h.handleCreateAlertRule)))
 	h.mux.HandleFunc("DELETE /api/alerts/{id}", auth(csrf(h.handleDeleteAlertRule)))
+
+	h.mux.HandleFunc("GET /api/log-alert-silences", auth(h.handleListLogAlertSilences))
+	h.mux.HandleFunc("POST /api/log-alert-silences", auth(csrf(h.handleCreateLogAlertSilence)))
+	h.mux.HandleFunc("DELETE /api/log-alert-silences/{id}", auth(csrf(h.handleDeleteLogAlertSilence)))
 
 	// Notification channels
 	h.mux.HandleFunc("GET /api/notifications", auth(h.handleListNotificationChannels))

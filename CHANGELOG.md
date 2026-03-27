@@ -4,6 +4,17 @@ All notable changes to TraceLog are documented here. The format is loosely based
 
 ## [Unreleased]
 
+## [v0.2.5] - 2026-03-26
+
+### Added
+
+- **Log alert silences:** mute noisy ingested-log notifications by **substring** (case-insensitive), with optional **server** and **log rule** scope. API: `GET/POST /api/log-alert-silences`, `DELETE /api/log-alert-silences/{id}`; **Settings → Alerts → Log alert silences**.
+
+### Fixed
+
+- **Dashboard navigation:** stop unexpected jumps back to the single-server view on the periodic server list refresh; auto-open only on first successful load (and after adding the only server). **Sidebar** and **server cards** set suppress for explicit navigation; **sessionStorage** restores the last page after reload (cleared on sign out).
+- **Server detail:** remove stray `dockerRows` assignments that caused `ReferenceError: dockerRows is not defined` in the browser console.
+
 ## [v0.2.4] - 2026-03-26
 
 ### Added

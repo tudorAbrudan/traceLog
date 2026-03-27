@@ -70,6 +70,7 @@ func (s *Store) migrate() error {
 	migrations := []string{
 		migration001,
 		migration002,
+		migration003,
 	}
 
 	for i := currentVersion; i < len(migrations); i++ {
@@ -247,6 +248,18 @@ CREATE TABLE IF NOT EXISTS process_metrics (
     threads INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_process_metrics_server_ts ON process_metrics(server_id, ts);
+`
+
+const migration003 = `
+CREATE TABLE IF NOT EXISTS log_alert_silences (
+    id TEXT PRIMARY KEY,
+    server_id TEXT NOT NULL DEFAULT '',
+    pattern TEXT NOT NULL,
+    rule_metric TEXT NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_log_alert_silences_server ON log_alert_silences(server_id);
 `
 
 func (s *Store) Backup(ctx context.Context, destPath string) error {
