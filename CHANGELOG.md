@@ -4,6 +4,20 @@ All notable changes to TraceLog are documented here. The format is loosely based
 
 ## [Unreleased]
 
+## [v0.2.10] - 2026-03-27
+
+### Added
+
+- **Alert emails and webhooks** append context: **server name**, **registered host**, **server ID**, **log source** (path or tag) for log-based rules, and **Docker container** for Docker metric alerts. **`TRACELOG_PUBLIC_DASHBOARD_URL`** (hub environment) adds a **Dashboard URL** line for a direct link to the UI (include path prefix when using `--url-prefix` / `TRACELOG_URL_PREFIX`).
+
+### Changed
+
+- **Alerts:** `OriginServerID`, `LogSource`, and `DockerContainer` on fired alerts so global log rules attribute the correct server; **alert history** uses the origin server id when present.
+
+### Documentation
+
+- **Configuration:** subsection **Alert emails and webhooks** describes the above and `TRACELOG_PUBLIC_DASHBOARD_URL`.
+
 ## [v0.2.9] - 2026-03-27
 
 ### Added

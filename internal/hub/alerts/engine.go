@@ -32,6 +32,12 @@ type Alert struct {
 	Threshold float64   `json:"threshold"`
 	FiredAt   time.Time `json:"fired_at"`
 	Message   string    `json:"message"`
+	// OriginServerID is the monitored host where the condition fired (ingested log, metrics scrape, docker agent).
+	OriginServerID string `json:"origin_server_id,omitempty"`
+	// LogSource is the ingested log source field (often a file path or docker:container tag).
+	LogSource string `json:"log_source,omitempty"`
+	// DockerContainer is set for docker_mem_pct / docker_cpu_percent alerts.
+	DockerContainer string `json:"docker_container,omitempty"`
 }
 
 type NotifyFunc func(ctx context.Context, channelID string, alert *Alert) error
@@ -102,13 +108,14 @@ func (e *Engine) Evaluate(ctx context.Context, serverID string, metrics *models.
 			if time.Since(violationStart) >= time.Duration(rule.DurationS)*time.Second {
 				e.doFireUnlocked(ctx, rule, "", func() *Alert {
 					return &Alert{
-						RuleID:    rule.ID,
-						ServerID:  rule.ServerID,
-						Metric:    rule.Metric,
-						Value:     value,
-						Threshold: rule.Threshold,
-						FiredAt:   time.Now().UTC(),
-						Message:   fmt.Sprintf("%s is %.1f (threshold: %s %.1f)", rule.Metric, value, rule.Operator, rule.Threshold),
+						RuleID:         rule.ID,
+						ServerID:       rule.ServerID,
+						OriginServerID: serverID,
+						Metric:         rule.Metric,
+						Value:          value,
+						Threshold:      rule.Threshold,
+						FiredAt:        time.Now().UTC(),
+						Message:        fmt.Sprintf("%s is %.1f (threshold: %s %.1f)", rule.Metric, value, rule.Operator, rule.Threshold),
 					}
 				}, "Metric alert fired", "rule", rule.ID, "metric", rule.Metric, "value", value, "threshold", rule.Threshold)
 			}
@@ -141,11 +148,11 @@ func (e *Engine) EvaluateLog(ctx context.Context, serverID, level, source, messa
 	e.mu.RUnlock()
 
 	for _, rule := range matches {
-		e.fireLogAlert(ctx, rule, level, source, message)
+		e.fireLogAlert(ctx, rule, serverID, level, source, message)
 	}
 }
 
-func (e *Engine) fireLogAlert(ctx context.Context, rule *Rule, level, source, msg string) {
+func (e *Engine) fireLogAlert(ctx context.Context, rule *Rule, originServerID, level, source, msg string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	preview := strings.TrimSpace(msg)
@@ -154,13 +161,15 @@ func (e *Engine) fireLogAlert(ctx context.Context, rule *Rule, level, source, ms
 	}
 	e.doFireUnlocked(ctx, rule, "", func() *Alert {
 		return &Alert{
-			RuleID:    rule.ID,
-			ServerID:  rule.ServerID,
-			Metric:    rule.Metric,
-			Value:     0,
-			Threshold: 0,
-			FiredAt:   time.Now().UTC(),
-			Message:   fmt.Sprintf("Ingested log level=%s source=%q: %s", level, source, preview),
+			RuleID:         rule.ID,
+			ServerID:       originServerID,
+			OriginServerID: originServerID,
+			Metric:         rule.Metric,
+			Value:          0,
+			Threshold:      0,
+			FiredAt:        time.Now().UTC(),
+			LogSource:      source,
+			Message:        fmt.Sprintf("Ingested log level=%s source=%q: %s", level, source, preview),
 		}
 	}, "Log alert fired", "rule", rule.ID, "metric", rule.Metric, "level", level, "source", source)
 }

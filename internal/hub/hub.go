@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -49,13 +51,6 @@ func New(cfg *models.Config) (*Hub, error) {
 
 	notifyMgr := notify.NewManager()
 
-	alertEngine := alerts.NewEngine(func(ctx context.Context, channelID string, alert *alerts.Alert) error {
-		if err := s.InsertAlertHistory(ctx, alert.RuleID, alert.ServerID, "fired", alert.Message); err != nil {
-			slog.Debug("alert history insert", "error", err)
-		}
-		return notifyMgr.Send(ctx, channelID, "TraceLog Alert: "+alert.Metric, alert.Message)
-	})
-
 	uptimeChecker := uptime.NewChecker(func(result *uptime.Result) {
 		if err := s.InsertUptimeResult(context.Background(), result); err != nil {
 			slog.Error("Failed to store uptime result", "error", err)
@@ -68,14 +63,56 @@ func New(cfg *models.Config) (*Hub, error) {
 		mux:              http.NewServeMux(),
 		rateLimiter:      newLoginRateLimiter(),
 		ws:               newWSHub(),
-		alerts:           alertEngine,
 		uptime:           uptimeChecker,
 		notify:           notifyMgr,
 		dockerLogWaiters: make(map[string]chan dockerLogResult),
 	}
+	h.alerts = alerts.NewEngine(h.notifyAlert)
 
 	h.registerRoutes()
 	return h, nil
+}
+
+// notifyAlert sends email/webhook with server and source context. Optional TRACELOG_PUBLIC_DASHBOARD_URL is appended for a clickable dashboard link.
+func (h *Hub) notifyAlert(ctx context.Context, channelID string, alert *alerts.Alert) error {
+	sid := alert.OriginServerID
+	if sid == "" {
+		sid = alert.ServerID
+	}
+	if err := h.store.InsertAlertHistory(ctx, alert.RuleID, sid, "fired", alert.Message); err != nil {
+		slog.Debug("alert history insert", "error", err)
+	}
+	body := formatAlertNotificationBody(h.store, ctx, alert, sid)
+	return h.notify.Send(ctx, channelID, "TraceLog Alert: "+alert.Metric, body)
+}
+
+func formatAlertNotificationBody(st *store.Store, ctx context.Context, alert *alerts.Alert, sid string) string {
+	var b strings.Builder
+	b.WriteString(alert.Message)
+	b.WriteString("\n\n---\n")
+	if sid != "" {
+		if srv, err := st.GetServer(ctx, sid); err == nil {
+			fmt.Fprintf(&b, "Server: %s\n", srv.Name)
+			if host := strings.TrimSpace(srv.Host); host != "" {
+				fmt.Fprintf(&b, "Registered host: %s\n", host)
+			}
+			fmt.Fprintf(&b, "Server ID: %s\n", srv.ID)
+		} else {
+			fmt.Fprintf(&b, "Server ID: %s\n", sid)
+		}
+	} else {
+		b.WriteString("(No server context.)\n")
+	}
+	if alert.LogSource != "" {
+		fmt.Fprintf(&b, "Log source (file / tag): %s\n", alert.LogSource)
+	}
+	if alert.DockerContainer != "" {
+		fmt.Fprintf(&b, "Docker container: %s\n", alert.DockerContainer)
+	}
+	if u := strings.TrimSpace(os.Getenv("TRACELOG_PUBLIC_DASHBOARD_URL")); u != "" {
+		fmt.Fprintf(&b, "Dashboard URL: %s\n", u)
+	}
+	return b.String()
 }
 
 func (h *Hub) Store() *store.Store {

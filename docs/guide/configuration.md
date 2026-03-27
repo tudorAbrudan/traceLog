@@ -81,6 +81,14 @@ Access **Settings** from the sidebar. Short reference:
 
 More detail: [Logs & HTTP analytics](./logs-http-analytics.md) (purge, blacklist, bad requests, WHOIS links).
 
+### Alert emails and webhooks
+
+Alert bodies include **server name**, **registered host** (if set in Settings → Servers), **server ID**, and when the alert comes from logs or Docker metrics also **log source** (file path or tag) and **Docker container** name. To append a **dashboard URL** line (for example behind a reverse proxy), set on the hub process:
+
+`TRACELOG_PUBLIC_DASHBOARD_URL=https://your-host.example.com/tracelog`
+
+(include path prefix if you use `--url-prefix` / `TRACELOG_URL_PREFIX`).
+
 ## Data Storage
 
 All data is stored in a SQLite database at `{data-dir}/tracelog.db` using WAL mode for concurrent reads.

@@ -54,12 +54,14 @@ func (e *Engine) EvaluateDocker(ctx context.Context, serverID string, batch []mo
 					v := value
 					e.doFireUnlocked(ctx, rule, n, func() *Alert {
 						return &Alert{
-							RuleID:    rule.ID,
-							ServerID:  serverID,
-							Metric:    rule.Metric,
-							Value:     v,
-							Threshold: rule.Threshold,
-							FiredAt:   time.Now().UTC(),
+							RuleID:          rule.ID,
+							ServerID:        serverID,
+							OriginServerID:  serverID,
+							Metric:          rule.Metric,
+							Value:           v,
+							Threshold:       rule.Threshold,
+							FiredAt:         time.Now().UTC(),
+							DockerContainer: n,
 							Message: fmt.Sprintf("%s container %q is %.1f (threshold: %s %.1f)",
 								rule.Metric, n, v, rule.Operator, rule.Threshold),
 						}
