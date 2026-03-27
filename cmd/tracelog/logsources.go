@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/tudorAbrudan/tracelog/internal/hub"
 	"github.com/tudorAbrudan/tracelog/internal/models"
@@ -28,14 +29,21 @@ func logSourcesForLocalAgent(ctx context.Context, h *hub.Hub) ([]models.LogSourc
 		if r.ServerID != "" && r.ServerID != localID {
 			continue
 		}
-		out = append(out, models.LogSource{
+		src := models.LogSource{
 			Name:      r.Name,
 			Path:      r.Path,
 			Type:      r.Type,
 			Format:    r.Format,
 			Container: r.Container,
 			Enabled:   true,
-		})
+		}
+		if r.IngestLevels != "" {
+			var levels []string
+			if err := json.Unmarshal([]byte(r.IngestLevels), &levels); err == nil {
+				src.IngestLevels = levels
+			}
+		}
+		out = append(out, src)
 	}
 	return out, nil
 }

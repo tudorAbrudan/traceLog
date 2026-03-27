@@ -37,6 +37,8 @@ type LogSource struct {
 	Type      string `json:"type" yaml:"type"`
 	Container string `json:"container,omitempty" yaml:"container,omitempty"`
 	Enabled   bool   `json:"enabled" yaml:"enabled"`
+	// IngestLevels, if non-empty, only these severities are sent to the hub (e.g. critical, error, deprecated).
+	IngestLevels []string `json:"ingest_levels,omitempty" yaml:"ingest_levels,omitempty"`
 }
 
 func DefaultConfig() *Config {

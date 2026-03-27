@@ -169,6 +169,9 @@
       <ul>
         <li><strong>Top client IPs</strong> — clients ranked by <em>total</em> request count (table below, up to 50 rows). <strong>Unique IPs</strong> in the summary is how many distinct addresses appear in the range.</li>
         <li><strong>Top IPs by error responses</strong> — clients ranked by how many <strong>4xx / 5xx</strong> responses they received (separate table). Use <strong>Lines</strong> to see sample failing requests for one IP.</li>
+        <li>
+          <strong>Self-traffic</strong> — rankings can ignore chosen <strong>User-Agent</strong> substrings (e.g. TraceLog’s uptime client) under <strong>Settings → General</strong>, so tables reflect your app’s visitors rather than monitoring probes.
+        </li>
       </ul>
     </div>
     <div class="stats-grid">
@@ -385,7 +388,7 @@
 </div>
 
 <style>
-  .analytics { padding: 1.5rem; max-width: 1500px; }
+  .analytics { padding: 1.5rem; max-width: none; }
   .page-intro {
     font-size: 0.82rem; color: var(--text-secondary); line-height: 1.5; margin-bottom: 1rem;
     padding: 0.75rem 1rem; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 10px;
@@ -460,13 +463,14 @@
   .tables-row {
     display: grid; gap: 0.75rem; margin-bottom: 1.25rem;
   }
-  .tables-row.three { grid-template-columns: repeat(3, 1fr); }
-  @media (max-width: 1100px) {
-    .tables-row.three { grid-template-columns: 1fr; }
+  .tables-row.three {
+    grid-template-columns: 1fr;
+    max-width: 1200px;
   }
   .table-section {
     background: var(--bg-secondary); border: 1px solid var(--border);
     border-radius: 10px; padding: 0.75rem; min-width: 0;
+    overflow-x: auto;
   }
 
   table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
@@ -477,7 +481,13 @@
   th.num, td.num { text-align: right; }
   td { padding: 0.35rem 0.5rem; color: var(--text-secondary); border-bottom: 1px solid var(--border); }
   td.mono { font-variant-numeric: tabular-nums; font-size: 0.75rem; }
-  td.path { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  td.path {
+    max-width: 72rem;
+    white-space: normal;
+    word-break: break-word;
+    font-size: 0.78rem;
+    line-height: 1.35;
+  }
   tr:last-child td { border-bottom: none; }
   tr.bl-row { background: rgba(248, 81, 73, 0.06); }
 

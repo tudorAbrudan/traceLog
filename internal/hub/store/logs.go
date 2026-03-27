@@ -36,6 +36,7 @@ func (s *Store) QueryLogs(ctx context.Context, serverID string, opts LogQueryOpt
 				WHEN 'critical' THEN 5
 				WHEN 'error' THEN 4
 				WHEN 'warn' THEN 3
+				WHEN 'deprecated' THEN 3
 				WHEN 'info' THEN 2
 				WHEN 'debug' THEN 1
 				ELSE 2
@@ -125,6 +126,8 @@ func logSeverityThreshold(s string) (int, bool) {
 	switch s {
 	case "error":
 		return 4, true
+	case "deprecated":
+		return 3, true
 	case "warn":
 		return 3, true
 	case "info":

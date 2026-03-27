@@ -71,6 +71,7 @@ func (s *Store) migrate() error {
 		migration001,
 		migration002,
 		migration003,
+		migration004,
 	}
 
 	for i := currentVersion; i < len(migrations); i++ {
@@ -260,6 +261,14 @@ CREATE TABLE IF NOT EXISTS log_alert_silences (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_log_alert_silences_server ON log_alert_silences(server_id);
+`
+
+const migration004 = `
+ALTER TABLE log_sources ADD COLUMN ingest_levels TEXT;
+
+INSERT INTO settings (key, value)
+SELECT 'access_stats_exclude_ua_substrings', '["TraceLog/1.0 Uptime Monitor"]'
+WHERE NOT EXISTS (SELECT 1 FROM settings WHERE key = 'access_stats_exclude_ua_substrings');
 `
 
 func (s *Store) Backup(ctx context.Context, destPath string) error {

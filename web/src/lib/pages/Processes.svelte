@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api } from '../api';
-  import { currentPage } from '../store';
 
   let servers: any[] = [];
   let selectedServer = '';
@@ -64,6 +63,9 @@
 </script>
 
 <div class="processes">
+  <p class="page-hint">
+    Linux: processes that look like they run <strong>inside Docker/containerd/Kubernetes cgroups</strong> are hidden so this list focuses on the host. Other OSes show all sampled processes. This is not a full container inventory — use <strong>Server → Docker</strong> for per-container stats.
+  </p>
   <div class="header">
     <h2>Processes</h2>
     <div class="controls">
@@ -127,6 +129,10 @@
 
 <style>
   .processes { padding: 1.5rem; max-width: 1400px; }
+  .page-hint {
+    font-size: 0.8rem; color: var(--text-secondary); line-height: 1.45; margin: 0 0 1rem 0;
+    padding: 0.65rem 0.85rem; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px;
+  }
   .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
   h2 { margin: 0; font-size: 1.3rem; color: var(--text-primary); }
   .controls { display: flex; align-items: center; gap: 0.75rem; }

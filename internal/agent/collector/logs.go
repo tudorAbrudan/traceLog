@@ -111,6 +111,8 @@ func applyPlainSeverity(line string, entry *models.LogEntry) {
 		entry.Level = "critical"
 	case strings.Contains(lower, "error"):
 		entry.Level = "error"
+	case strings.Contains(lower, "deprecated"):
+		entry.Level = "deprecated"
 	case strings.Contains(lower, "warn"):
 		entry.Level = "warn"
 	case strings.Contains(lower, "debug"):
@@ -150,5 +152,24 @@ func parseLine(src models.LogSource, line string) *models.LogEntry {
 		applyPlainSeverity(line, entry)
 	}
 
+	if !entryPassesIngestFilter(src, entry.Level) {
+		return nil
+	}
 	return entry
+}
+
+func entryPassesIngestFilter(src models.LogSource, level string) bool {
+	if len(src.IngestLevels) == 0 {
+		return true
+	}
+	lv := strings.ToLower(strings.TrimSpace(level))
+	if lv == "" {
+		lv = "info"
+	}
+	for _, a := range src.IngestLevels {
+		if strings.ToLower(strings.TrimSpace(a)) == lv {
+			return true
+		}
+	}
+	return false
 }

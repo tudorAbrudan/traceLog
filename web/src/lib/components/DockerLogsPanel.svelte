@@ -4,7 +4,14 @@
 
   export let serverId = '';
   /** Same values as Logs page — filters loaded container output client-side (keyword heuristics). */
-  export let logFilter: 'all' | 'critical' | 'min_error' | 'min_warn' | 'min_info' | 'min_debug' = 'all';
+  export let logFilter:
+    | 'all'
+    | 'critical'
+    | 'min_error'
+    | 'min_warn'
+    | 'min_deprecated'
+    | 'min_info'
+    | 'min_debug' = 'all';
 
   let dockerRows: any[] = [];
   let selectedContainer = '';
@@ -58,6 +65,7 @@
     const t = line;
     if (/\b(FATAL|CRITICAL|PANIC|EMERG)\b/i.test(t)) return 5;
     if (/\b(ERROR)\b|\] ERROR\b|level=error\b/i.test(t)) return 4;
+    if (/\bDEPRECATED\b|deprecated/i.test(t)) return 3;
     if (/\b(WARN|WARNING)\b|\] WARN\b|level=warn/i.test(t)) return 3;
     if (/\b(DEBUG|DBG)\b|\] DEBUG\b|level=debug/i.test(t)) return 1;
     if (/\b(INFO)\b|\] INFO\b|level=info/i.test(t)) return 2;
@@ -68,7 +76,13 @@
     if (f === 'all') return true;
     const r = dockerLineRank(line);
     if (f === 'critical') return r === 5;
-    const thr: Record<string, number> = { min_error: 4, min_warn: 3, min_info: 2, min_debug: 1 };
+    const thr: Record<string, number> = {
+      min_error: 4,
+      min_warn: 3,
+      min_deprecated: 3,
+      min_info: 2,
+      min_debug: 1,
+    };
     const t = thr[f];
     return t !== undefined && r >= t;
   }

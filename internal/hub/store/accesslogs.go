@@ -3,10 +3,32 @@ package store
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"time"
 
 	"github.com/tudorAbrudan/tracelog/internal/models"
 )
+
+// accessUAExcludeSQL builds AND NOT (INSTR(...) OR ...) to drop rows whose User-Agent contains any pattern (case-insensitive).
+func accessUAExcludeSQL(patterns []string) (cond string, args []any) {
+	var parts []string
+	for _, p := range patterns {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if len(p) > 200 {
+			p = p[:200]
+		}
+		pat := strings.ToLower(p)
+		parts = append(parts, `INSTR(LOWER(COALESCE(user_agent,'')), ?) > 0`)
+		args = append(args, pat)
+	}
+	if len(parts) == 0 {
+		return "", nil
+	}
+	return ` AND NOT (` + strings.Join(parts, " OR ") + `)`, args
+}
 
 func (s *Store) InsertAccessLog(ctx context.Context, entry *models.AccessLogEntry) error {
 	_, err := s.db.ExecContext(ctx,
@@ -57,7 +79,8 @@ type IPBadCount struct {
 }
 
 // GetAccessLogStats aggregates HTTP access data. topN controls top paths, IPs, method+paths, and bad-by-IP rows (clamped 5–100).
-func (s *Store) GetAccessLogStats(ctx context.Context, serverID string, since time.Time, topN int) (*AccessLogStats, error) {
+// excludeUASubstrings removes matching User-Agent rows from all aggregates (e.g. TraceLog’s own uptime probes).
+func (s *Store) GetAccessLogStats(ctx context.Context, serverID string, since time.Time, topN int, excludeUASubstrings []string) (*AccessLogStats, error) {
 	if topN < 5 {
 		topN = 5
 	}
@@ -68,27 +91,31 @@ func (s *Store) GetAccessLogStats(ctx context.Context, serverID string, since ti
 	stats := &AccessLogStats{
 		StatusCodes: make(map[string]int),
 	}
+	uaCond, uaArgs := accessUAExcludeSQL(excludeUASubstrings)
+	baseArgs := []any{serverID, sinceStr}
+	baseWhere := `server_id = ? AND ts >= ?` + uaCond
 
 	err := s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*), COALESCE(AVG(duration_ms), 0),
 		 COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1.0 ELSE 0.0 END) / NULLIF(COUNT(*), 0) * 100, 0)
-		 FROM access_logs WHERE server_id = ? AND ts >= ?`,
-		serverID, sinceStr,
+		 FROM access_logs WHERE `+baseWhere,
+		append(append([]any{}, baseArgs...), uaArgs...)...,
 	).Scan(&stats.TotalRequests, &stats.AvgDuration, &stats.ErrorRate)
 	if err != nil {
 		return nil, err
 	}
 
+	uniqArgs := append(append([]any{}, baseArgs...), uaArgs...)
 	_ = s.db.QueryRowContext(ctx,
-		`SELECT COUNT(DISTINCT ip) FROM access_logs WHERE server_id = ? AND ts >= ? AND ip != ''`,
-		serverID, sinceStr,
+		`SELECT COUNT(DISTINCT ip) FROM access_logs WHERE `+baseWhere+` AND ip != ''`,
+		uniqArgs...,
 	).Scan(&stats.UniqueIPCount)
 
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT CAST(status_code / 100 AS TEXT) || 'xx', COUNT(*)
-		 FROM access_logs WHERE server_id = ? AND ts >= ?
+		 FROM access_logs WHERE `+baseWhere+`
 		 GROUP BY CAST(status_code / 100 AS TEXT) ORDER BY 2 DESC`,
-		serverID, sinceStr,
+		append(append([]any{}, baseArgs...), uaArgs...)...,
 	)
 	if err == nil {
 		defer rows.Close()
@@ -102,10 +129,11 @@ func (s *Store) GetAccessLogStats(ctx context.Context, serverID string, since ti
 		}
 	}
 
+	qArgs := append(append([]any{}, baseArgs...), uaArgs...)
 	rows, err = s.db.QueryContext(ctx,
 		`SELECT path, COUNT(*) as cnt FROM access_logs
-		 WHERE server_id = ? AND ts >= ? GROUP BY path ORDER BY cnt DESC LIMIT ?`,
-		serverID, sinceStr, topN,
+		 WHERE `+baseWhere+` GROUP BY path ORDER BY cnt DESC LIMIT ?`,
+		append(qArgs, topN)...,
 	)
 	if err == nil {
 		defer rows.Close()
@@ -120,8 +148,8 @@ func (s *Store) GetAccessLogStats(ctx context.Context, serverID string, since ti
 
 	rows, err = s.db.QueryContext(ctx,
 		`SELECT ip, COUNT(*) as cnt FROM access_logs
-		 WHERE server_id = ? AND ts >= ? AND ip != '' GROUP BY ip ORDER BY cnt DESC LIMIT ?`,
-		serverID, sinceStr, topN,
+		 WHERE `+baseWhere+` AND ip != '' GROUP BY ip ORDER BY cnt DESC LIMIT ?`,
+		append(qArgs, topN)...,
 	)
 	if err == nil {
 		defer rows.Close()
@@ -136,8 +164,8 @@ func (s *Store) GetAccessLogStats(ctx context.Context, serverID string, since ti
 
 	rows, err = s.db.QueryContext(ctx,
 		`SELECT method, path, COUNT(*) as cnt FROM access_logs
-		 WHERE server_id = ? AND ts >= ? GROUP BY method, path ORDER BY cnt DESC LIMIT ?`,
-		serverID, sinceStr, topN,
+		 WHERE `+baseWhere+` GROUP BY method, path ORDER BY cnt DESC LIMIT ?`,
+		append(qArgs, topN)...,
 	)
 	if err == nil {
 		defer rows.Close()
@@ -156,9 +184,9 @@ func (s *Store) GetAccessLogStats(ctx context.Context, serverID string, since ti
 	}
 	rows, err = s.db.QueryContext(ctx,
 		`SELECT ip, COUNT(*) as cnt FROM access_logs
-		 WHERE server_id = ? AND ts >= ? AND status_code >= 400 AND ip != ''
+		 WHERE `+baseWhere+` AND status_code >= 400 AND ip != ''
 		 GROUP BY ip ORDER BY cnt DESC LIMIT ?`,
-		serverID, sinceStr, badN,
+		append(qArgs, badN)...,
 	)
 	if err == nil {
 		defer rows.Close()
@@ -175,7 +203,7 @@ func (s *Store) GetAccessLogStats(ctx context.Context, serverID string, since ti
 }
 
 // GetAccessLogTopIPCounts returns IPs ordered by request count (for blacklist estimation).
-func (s *Store) GetAccessLogTopIPCounts(ctx context.Context, serverID string, since time.Time, limit int) ([]IPCount, error) {
+func (s *Store) GetAccessLogTopIPCounts(ctx context.Context, serverID string, since time.Time, limit int, excludeUASubstrings []string) ([]IPCount, error) {
 	if limit <= 0 {
 		limit = 15000
 	}
@@ -183,10 +211,12 @@ func (s *Store) GetAccessLogTopIPCounts(ctx context.Context, serverID string, si
 		limit = 25000
 	}
 	sinceStr := since.UTC().Format(time.RFC3339)
+	uaCond, uaArgs := accessUAExcludeSQL(excludeUASubstrings)
+	baseWhere := `server_id = ? AND ts >= ?` + uaCond
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT ip, COUNT(*) as cnt FROM access_logs
-		 WHERE server_id = ? AND ts >= ? AND ip != '' GROUP BY ip ORDER BY cnt DESC LIMIT ?`,
-		serverID, sinceStr, limit,
+		 WHERE `+baseWhere+` AND ip != '' GROUP BY ip ORDER BY cnt DESC LIMIT ?`,
+		append(append([]any{serverID, sinceStr}, uaArgs...), limit)...,
 	)
 	if err != nil {
 		return nil, err

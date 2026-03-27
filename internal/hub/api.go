@@ -322,6 +322,24 @@ func (h *Hub) handlePurgeLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": n})
 }
 
+func (h *Hub) accessStatsExcludeUAPatterns(ctx context.Context) []string {
+	raw, err := h.store.GetSetting(ctx, "access_stats_exclude_ua_substrings")
+	if err != nil || strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var list []string
+	if err := json.Unmarshal([]byte(raw), &list); err != nil {
+		return nil
+	}
+	var out []string
+	for _, s := range list {
+		if t := strings.TrimSpace(s); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
 // --- Access Logs / HTTP Analytics ---
 
 func (h *Hub) handleAccessLogStats(w http.ResponseWriter, r *http.Request) {
@@ -342,7 +360,8 @@ func (h *Hub) handleAccessLogStats(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	since := time.Now().Add(-d)
-	stats, err := h.store.GetAccessLogStats(r.Context(), id, since, topN)
+	uaExclude := h.accessStatsExcludeUAPatterns(r.Context())
+	stats, err := h.store.GetAccessLogStats(r.Context(), id, since, topN, uaExclude)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to get access stats")
 		return
@@ -351,7 +370,7 @@ func (h *Hub) handleAccessLogStats(w http.ResponseWriter, r *http.Request) {
 	rules := h.loadAccessIPBlacklist(r.Context())
 	if len(rules) > 0 {
 		const capIPGroups = 15000
-		ipRows, err := h.store.GetAccessLogTopIPCounts(r.Context(), id, since, capIPGroups)
+		ipRows, err := h.store.GetAccessLogTopIPCounts(r.Context(), id, since, capIPGroups, uaExclude)
 		if err != nil {
 			slog.Warn("access stats: top ip counts for blacklist", "error", err)
 		} else {
@@ -488,11 +507,48 @@ func (h *Hub) handleCreateLogSource(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "%v", err)
 		return
 	}
+	norm, err := ValidateLogSourceIngestList(ls.IngestLevelsList)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "%v", err)
+		return
+	}
+	ls.IngestLevelsList = norm
 	if err := h.store.CreateLogSource(r.Context(), &ls); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to create log source: %v", err)
 		return
 	}
+	h.reloadLogIngestRules(r.Context())
 	writeJSON(w, http.StatusCreated, ls)
+}
+
+func (h *Hub) handleUpdateLogSource(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "missing id")
+		return
+	}
+	var body struct {
+		IngestLevels *[]string `json:"ingest_levels"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if body.IngestLevels == nil {
+		writeError(w, http.StatusBadRequest, "ingest_levels is required (use [] to clear and store all severities)")
+		return
+	}
+	norm, err := ValidateLogSourceIngestList(*body.IngestLevels)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "%v", err)
+		return
+	}
+	if err := h.store.UpdateLogSourceIngestLevels(r.Context(), id, norm); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to update log source")
+		return
+	}
+	h.reloadLogIngestRules(r.Context())
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "ingest_levels": norm})
 }
 
 func (h *Hub) handleDeleteLogSource(w http.ResponseWriter, r *http.Request) {
@@ -500,6 +556,7 @@ func (h *Hub) handleDeleteLogSource(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Failed to delete log source")
 		return
 	}
+	h.reloadLogIngestRules(r.Context())
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -520,10 +577,24 @@ func (h *Hub) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
-	allowedKeys := map[string]bool{"retention_days": true, "collection_interval": true}
+	allowedKeys := map[string]bool{
+		"retention_days":                     true,
+		"collection_interval":                true,
+		"access_stats_exclude_ua_substrings": true,
+	}
 	for k, v := range settings {
 		if !allowedKeys[k] {
 			continue
+		}
+		if k == "access_stats_exclude_ua_substrings" {
+			if strings.TrimSpace(v) == "" {
+				v = "[]"
+			}
+			var tmp []string
+			if err := json.Unmarshal([]byte(v), &tmp); err != nil {
+				writeError(w, http.StatusBadRequest, "access_stats_exclude_ua_substrings must be a JSON array of strings")
+				return
+			}
 		}
 		if err := h.store.SetSetting(r.Context(), k, v); err != nil {
 			writeError(w, http.StatusInternalServerError, "Failed to save setting %s", k)

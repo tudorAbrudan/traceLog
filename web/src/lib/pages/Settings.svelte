@@ -7,6 +7,8 @@
   let retentionDays = 30;
   let collectionInterval = 10;
   let saved = false;
+  /** Substrings matched case-insensitively in User-Agent; excluded from HTTP Analytics aggregates (not from raw “Recent requests”). */
+  let excludeUAText = '';
 
   // Log sources
   let logSources: any[] = [];
@@ -44,6 +46,10 @@
     { id: 'log_warn', label: 'Ingested log · warn, error, or critical' },
   ];
 
+  const ingestLevelOpts = ['critical', 'error', 'warn', 'info', 'debug', 'deprecated'] as const;
+  /** Per log source id: which severities to store (empty = all). */
+  let ingestPick: Record<string, Record<string, boolean>> = {};
+
   const tabs = [
     { id: 'general', label: 'General' },
     { id: 'logs', label: 'Log Sources' },
@@ -80,6 +86,15 @@
       const s = await api.getSettings();
       retentionDays = parseInt(s.retention_days) || 30;
       collectionInterval = parseInt(s.collection_interval) || 10;
+      try {
+        const raw = s.access_stats_exclude_ua_substrings;
+        if (raw) {
+          const arr = JSON.parse(raw);
+          excludeUAText = Array.isArray(arr) ? arr.join('\n') : '';
+        }
+      } catch {
+        excludeUAText = '';
+      }
     } catch {}
   });
 
@@ -94,7 +109,10 @@
       }
     }
     try {
-      if (tab === 'logs') logSources = (await api.listLogSources()) || [];
+      if (tab === 'logs') {
+        logSources = (await api.listLogSources()) || [];
+        syncIngestPickFromSources();
+      }
       if (tab === 'notifications') channels = (await api.listNotificationChannels()) || [];
       if (tab === 'servers') servers = (await api.listServers()) || [];
       if (tab === 'alerts') {
@@ -106,11 +124,44 @@
     } catch {}
   }
 
+  function syncIngestPickFromSources() {
+    const next: Record<string, Record<string, boolean>> = {};
+    for (const ls of logSources) {
+      const cur = ls.ingest_levels;
+      const row: Record<string, boolean> = {};
+      for (const lv of ingestLevelOpts) {
+        row[lv] = Array.isArray(cur) && cur.includes(lv);
+      }
+      next[ls.id] = row;
+    }
+    ingestPick = next;
+  }
+
   async function saveGeneral() {
     try {
-      await api.updateSettings({ retention_days: String(retentionDays), collection_interval: String(collectionInterval) });
+      const uaLines = excludeUAText
+        .split('\n')
+        .map((x) => x.trim())
+        .filter(Boolean);
+      await api.updateSettings({
+        retention_days: String(retentionDays),
+        collection_interval: String(collectionInterval),
+        access_stats_exclude_ua_substrings: JSON.stringify(uaLines),
+      });
       saved = true; setTimeout(() => saved = false, 2000);
     } catch (e: any) { alert('Save failed: ' + e.message); }
+  }
+
+  async function saveIngestLevels(lsId: string) {
+    const row = ingestPick[lsId] || {};
+    const levels = ingestLevelOpts.filter((lv) => row[lv]);
+    try {
+      await api.updateLogSource(lsId, { ingest_levels: levels });
+      logSources = (await api.listLogSources()) || [];
+      syncIngestPickFromSources();
+    } catch (e: any) {
+      alert('Failed: ' + e.message);
+    }
   }
 
   // Log sources
@@ -125,6 +176,7 @@
       await api.createLogSource({ name, path, format: newLogFormat, type: 'file', server_id: '', enabled: true });
       newLogName = ''; newLogPath = '';
       logSources = (await api.listLogSources()) || [];
+      syncIngestPickFromSources();
     } catch (e: any) { alert('Failed: ' + e.message); }
   }
   async function removeLogSource(id: string) {
@@ -139,6 +191,7 @@
           await api.createLogSource({ name: lf.name, path: lf.path, format: lf.format, type: lf.type, server_id: '', enabled: true });
         }
         logSources = (await api.listLogSources()) || [];
+        syncIngestPickFromSources();
         alert(`Found and added ${d.log_files.length} log sources.`);
       } else {
         alert('No common log files found on this system.');
@@ -268,6 +321,20 @@
               <option value={60}>60 seconds</option>
             </select>
           </div>
+          <div class="field">
+            <label for="exclude-ua">HTTP analytics — ignore User-Agent (one substring per line)</label>
+            <p class="hint field-hint">
+              Rows whose User-Agent contains any of these (case-insensitive) are <strong>excluded from</strong> Top URL paths, Top method + path, Top IPs, and summary counts.
+              Default includes TraceLog’s uptime probe. Raw “Recent requests” on HTTP Analytics is unchanged. Add other lines if your UI or bots use a fixed User-Agent.
+            </p>
+            <textarea
+              id="exclude-ua"
+              class="ua-exclude-ta"
+              bind:value={excludeUAText}
+              rows="3"
+              placeholder="TraceLog/1.0 Uptime Monitor"
+            ></textarea>
+          </div>
           <button class="btn-save" on:click={saveGeneral}>{saved ? '✓ Saved' : 'Save Changes'}</button>
         </div>
 
@@ -292,15 +359,28 @@
             <button class="btn-save" on:click={addLogSource}>Add</button>
           </div>
           <p class="hint">Manual add: the file must exist on the machine running TraceLog. Nginx and apache formats are checked against the first lines of the file (access-log style). Use plain for error logs, app output, or syslog-style lines.</p>
+          <p class="hint">
+            <strong>Store only chosen severities</strong> (per source): unchecked = ingest nothing for that level. If <em>none</em> are checked, <strong>all</strong> levels are stored. After changing filters, <strong>restart TraceLog</strong> so the agent reloads config. The hub also drops non-matching lines as a safeguard.
+          </p>
           {#if logSources.length === 0}
             <p class="hint">No log sources configured. Click "Scan" or add manually above.</p>
           {:else}
             <div class="item-list">
               {#each logSources as ls (ls.id)}
-                <div class="item-row">
-                  <div>
+                <div class="item-row ingest-row">
+                  <div class="ingest-main">
                     <strong>{ls.name}</strong>
                     <span class="item-detail">{ls.path || ls.container} ({ls.format})</span>
+                    <div class="ingest-levels">
+                      {#each ingestLevelOpts as lv}
+                        <label class="ingest-cb"
+                          ><input type="checkbox" bind:checked={ingestPick[ls.id][lv]} /> {lv}</label
+                        >
+                      {/each}
+                    </div>
+                    <button type="button" class="btn-secondary ingest-save" on:click={() => saveIngestLevels(ls.id)}
+                      >Save levels</button
+                    >
                   </div>
                   <button class="btn-delete" on:click={() => removeLogSource(ls.id)}>Delete</button>
                 </div>
@@ -617,6 +697,16 @@
   .about-item strong, .about-item a { color: var(--text-primary); }
   .alert-metric-select { min-width: 200px; max-width: 100%; flex: 1 1 220px; }
   .alert-form-log { align-items: flex-end; }
+  .ua-exclude-ta {
+    width: 100%; min-height: 4rem; font-family: monospace; font-size: 0.78rem;
+    padding: 0.5rem; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text-primary); resize: vertical;
+  }
+  .ingest-row { align-items: flex-start; }
+  .ingest-main { flex: 1; min-width: 0; }
+  .ingest-levels { display: flex; flex-wrap: wrap; gap: 0.35rem 0.9rem; margin: 0.45rem 0; }
+  .ingest-cb { font-size: 0.72rem; color: var(--text-secondary); cursor: pointer; user-select: none; }
+  .ingest-save { margin-bottom: 0 !important; margin-top: 0.35rem; }
   @media (max-width: 900px) {
     .settings { padding: 1rem 0.5rem; }
     .settings-layout { flex-direction: column; gap: 0.75rem; }

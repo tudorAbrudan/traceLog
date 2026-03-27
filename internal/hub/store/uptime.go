@@ -39,6 +39,7 @@ func (s *Store) GetUptimeResults(ctx context.Context, checkID string, since time
 		}
 		r.Ts, _ = time.Parse(time.RFC3339, ts)
 		r.Error = errStr
+		r.Up = errStr == "" && r.StatusCode >= 200 && r.StatusCode < 400
 		results = append(results, r)
 	}
 	return results, nil

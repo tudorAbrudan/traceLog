@@ -117,6 +117,8 @@ export const api = {
   // Log Sources
   listLogSources: () => request('GET', '/log-sources'),
   createLogSource: (data: any) => request('POST', '/log-sources', data),
+  updateLogSource: (id: string, data: { ingest_levels: string[] }) =>
+    request('PUT', `/log-sources/${id}`, data),
   deleteLogSource: (id: string) => request('DELETE', `/log-sources/${id}`),
 
   // Settings

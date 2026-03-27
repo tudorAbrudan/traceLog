@@ -5,37 +5,59 @@
   import ServerCard from '../components/ServerCard.svelte';
   import { currentPage, suppressSingleServerAutoOpen } from '../store';
 
+  /** One auto-jump to the lone server per tab session; blocks stray Overview ticks from changing the route again. */
+  const SINGLE_SERVER_AUTO_NAV_KEY = 'tracelog-single-server-auto-nav-done';
+
   let servers: any[] = [];
   let loading = true;
   let showForm = false;
   let newName = '';
   let newHost = '';
 
-  /** Only decide auto-open once per Overview mount; never from the 10s poll (avoids surprise redirects). */
+  /** After the first successful list fetch, auto-open runs at most once; later polls only refresh `servers`. */
   let autoNavResolved = false;
 
-  onMount(async () => {
-    await loadServers();
-
-    const interval = setInterval(loadServers, 10000);
+  onMount(() => {
+    void fetchServersAndMaybeAutoOpenOnce();
+    const interval = setInterval(() => {
+      void fetchServersAndMaybeAutoOpenOnce();
+    }, 10000);
     return () => clearInterval(interval);
   });
 
-  async function loadServers() {
+  async function refreshServerList(): Promise<boolean> {
     try {
       const list = (await api.listServers()) || [];
       servers = list;
-      if (!autoNavResolved) {
-        autoNavResolved = true;
-        if (list.length === 1 && !get(suppressSingleServerAutoOpen)) {
-          currentPage.set('server:' + list[0].id);
-        }
-      }
+      return true;
     } catch {
-      /* keep autoNavResolved false so a later poll can still auto-open after a failed first fetch */
+      return false;
     } finally {
       loading = false;
     }
+  }
+
+  function applySingleServerAutoOpenOnce() {
+    if (autoNavResolved) return;
+    autoNavResolved = true;
+    if (servers.length !== 1 || get(suppressSingleServerAutoOpen)) return;
+    try {
+      if (sessionStorage.getItem(SINGLE_SERVER_AUTO_NAV_KEY)) return;
+    } catch {
+      /* private mode */
+    }
+    currentPage.set('server:' + servers[0].id);
+    try {
+      sessionStorage.setItem(SINGLE_SERVER_AUTO_NAV_KEY, '1');
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** Used on mount and every 10s: refresh list; only the first successful refresh may change the route. */
+  async function fetchServersAndMaybeAutoOpenOnce() {
+    const ok = await refreshServerList();
+    if (ok) applySingleServerAutoOpenOnce();
   }
 
   async function addServer() {
@@ -43,9 +65,15 @@
     try {
       await api.createServer(newName, newHost);
       newName = ''; newHost = ''; showForm = false;
-      await loadServers();
+      await refreshServerList();
+      autoNavResolved = true;
       if (servers.length === 1 && !get(suppressSingleServerAutoOpen)) {
         currentPage.set('server:' + servers[0].id);
+        try {
+          sessionStorage.setItem(SINGLE_SERVER_AUTO_NAV_KEY, '1');
+        } catch {
+          /* ignore */
+        }
       }
     } catch (e: any) {
       alert('Failed: ' + e.message);

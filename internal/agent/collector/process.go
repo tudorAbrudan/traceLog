@@ -41,6 +41,10 @@ func (c *ProcessCollector) Collect(ctx context.Context) ([]models.ProcessMetrics
 	var results []models.ProcessMetrics
 
 	for _, p := range procs {
+		if processInDockerCgroup(p.Pid) {
+			continue
+		}
+
 		name, err := p.NameWithContext(ctx)
 		if err != nil {
 			continue

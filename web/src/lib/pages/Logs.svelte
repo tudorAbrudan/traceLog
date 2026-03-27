@@ -8,7 +8,15 @@
   let selectedServer = '';
   let filter = '';
   /** Stored log lines in DB: exact critical, or minimum severity (includes more severe). */
-  let logFilter: 'all' | 'critical' | 'min_error' | 'min_warn' | 'min_info' | 'min_debug' = 'all';
+  type LogFilter =
+    | 'all'
+    | 'critical'
+    | 'min_error'
+    | 'min_warn'
+    | 'min_deprecated'
+    | 'min_info'
+    | 'min_debug';
+  let logFilter: LogFilter = 'all';
   let loading = false;
   let autoRefresh = true;
   let intervalId: any;
@@ -17,23 +25,28 @@
   let purgeSource = '';
   let purging = false;
 
-  const logFilterOptions: { id: typeof logFilter; label: string }[] = [
+  const logFilterOptions: { id: LogFilter; label: string }[] = [
     { id: 'all', label: 'All levels' },
     { id: 'critical', label: 'Critical only' },
     { id: 'min_error', label: 'Error or higher' },
     { id: 'min_warn', label: 'Warning or higher' },
+    { id: 'min_deprecated', label: 'Deprecated or higher' },
     { id: 'min_info', label: 'Info or higher' },
     { id: 'min_debug', label: 'Debug or higher' },
   ];
 
-  onMount(async () => {
-    try {
-      servers = await api.listServers();
-      if (servers.length > 0) {
-        selectedServer = servers[0].id;
-        await fetchLogs();
+  onMount(() => {
+    void (async () => {
+      try {
+        servers = await api.listServers();
+        if (servers.length > 0) {
+          selectedServer = servers[0].id;
+          await fetchLogs();
+        }
+      } catch {
+        /* ignore */
       }
-    } catch {}
+    })();
 
     intervalId = setInterval(() => {
       if (autoRefresh && selectedServer) fetchLogs();
@@ -51,7 +64,9 @@
         range: '24h',
       };
       if (logFilter === 'critical') q.level = 'critical';
-      else if (logFilter.startsWith('min_')) q.severity_min = logFilter.replace('min_', '') as 'error' | 'warn' | 'info' | 'debug';
+      else if (logFilter.startsWith('min_')) {
+        q.severity_min = logFilter.replace('min_', '') as 'error' | 'warn' | 'deprecated' | 'info' | 'debug';
+      }
 
       const result = await api.getLogs(selectedServer, q);
       logs = result || [];
@@ -67,6 +82,7 @@
       case 'critical': return '#da3633';
       case 'error': return '#f85149';
       case 'warn': return '#d29922';
+      case 'deprecated': return '#a371f7';
       case 'info': return '#58a6ff';
       case 'debug': return '#8b949e';
       default: return '#e6edf3';

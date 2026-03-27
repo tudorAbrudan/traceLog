@@ -4,6 +4,25 @@ All notable changes to TraceLog are documented here. The format is loosely based
 
 ## [Unreleased]
 
+## [v0.2.6] - 2026-03-27
+
+### Added
+
+- **Log sources — ingest by severity:** per source, choose which levels are **stored** (critical, error, warn, info, debug, **deprecated**). None checked = all levels (unchanged behaviour). **Settings → Log Sources** → **Save levels**; **restart TraceLog** so the agent reloads. Hub drops non-matching lines as well. API: `PUT /api/log-sources/{id}` with `ingest_levels`; DB column `ingest_levels`.
+- **Deprecated** log level: detected in plain/apache-style lines; query support and **Logs** filter “Deprecated or higher”; Docker logs panel heuristic.
+- **HTTP analytics — ignore User-Agent:** **Settings → General**, one substring per line; those rows are excluded from **Top URL paths**, **Top method + path**, **Top IPs**, and summary aggregates (not from raw “Recent requests”). Default includes `TraceLog/1.0 Uptime Monitor`.
+- **Uptime monitors:** 7-day **history strip** (green = up, red = down, up to 200 samples); note that checking a URL on the **same machine** only validates local reachability.
+- **Processes (Linux):** hide processes that appear to run under **docker / containerd / kubepods** cgroups; short UI note. Non-Linux unchanged.
+
+### Changed
+
+- **HTTP Analytics:** wider single-column layout; paths use **word-wrap** instead of heavy truncation.
+- **Overview:** server list poll only refreshes data; **sessionStorage** guard so single-server auto-nav does not repeat unexpectedly; `onMount` cleanup typing for Svelte 5.
+
+### Fixed
+
+- **Sign out:** also clears `tracelog-single-server-auto-nav-done` from session storage.
+
 ## [v0.2.5] - 2026-03-26
 
 ### Added

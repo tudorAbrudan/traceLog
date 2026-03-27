@@ -18,7 +18,7 @@ func LogLevelMatches(ruleMetric, entryLevel string) bool {
 	case "log_error":
 		return entryLevel == "critical" || entryLevel == "error"
 	case "log_warn":
-		return entryLevel == "critical" || entryLevel == "error" || entryLevel == "warn"
+		return entryLevel == "critical" || entryLevel == "error" || entryLevel == "warn" || entryLevel == "deprecated"
 	default:
 		return false
 	}

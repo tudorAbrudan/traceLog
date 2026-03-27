@@ -34,6 +34,9 @@ type Hub struct {
 	dockerLogMu      sync.Mutex
 	dockerLogWaiters map[string]chan dockerLogResult
 
+	logIngestMu    sync.RWMutex
+	logIngestRules logIngestRules
+
 	spaOnce sync.Once
 	spaH    http.Handler
 }
@@ -114,6 +117,9 @@ func (h *Hub) IngestAccessLog(ctx context.Context, entry *models.AccessLogEntry)
 }
 
 func (h *Hub) IngestLog(ctx context.Context, entry *models.LogEntry) error {
+	if !h.logIngestAllowed(entry.ServerID, entry.Source, entry.Level) {
+		return nil
+	}
 	if err := h.store.InsertLog(ctx, entry); err != nil {
 		return err
 	}
@@ -166,6 +172,8 @@ func (h *Hub) Start(ctx context.Context) error {
 
 	// Load notification channels
 	h.loadNotificationChannels(ctx)
+
+	h.reloadLogIngestRules(ctx)
 
 	slog.Info("Hub listening", "addr", addr)
 
@@ -269,6 +277,7 @@ func (h *Hub) registerRoutes() {
 	// Log sources
 	h.mux.HandleFunc("GET /api/log-sources", auth(h.handleListLogSources))
 	h.mux.HandleFunc("POST /api/log-sources", auth(csrf(h.handleCreateLogSource)))
+	h.mux.HandleFunc("PUT /api/log-sources/{id}", auth(csrf(h.handleUpdateLogSource)))
 	h.mux.HandleFunc("DELETE /api/log-sources/{id}", auth(csrf(h.handleDeleteLogSource)))
 
 	// Logs

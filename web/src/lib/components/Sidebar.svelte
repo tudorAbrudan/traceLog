@@ -26,6 +26,7 @@
     } catch {}
     try {
       sessionStorage.removeItem('tracelog-current-page');
+      sessionStorage.removeItem('tracelog-single-server-auto-nav-done');
     } catch {
       /* ignore */
     }
