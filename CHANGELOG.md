@@ -4,6 +4,12 @@ All notable changes to TraceLog are documented here. The format is loosely based
 
 ## [Unreleased]
 
+## [v0.2.7] - 2026-03-28
+
+### Fixed
+
+- **Release / GoReleaser:** keep `web/package-lock.json` aligned with `package.json` version and build the frontend with **`npm ci`** in the release workflow (instead of `npm install`) so the runner does not rewrite the lockfile and GoReleaser no longer fails with `git is in a dirty state`.
+
 ## [v0.2.6] - 2026-03-27
 
 ### Added
