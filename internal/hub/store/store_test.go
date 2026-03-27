@@ -312,6 +312,54 @@ func TestLogInsertAndQuery(t *testing.T) {
 	}
 }
 
+func TestQueryLogsSeverityMin(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	srv, _ := s.CreateServer(ctx, "sev", "")
+	base := time.Now().UTC()
+	for i, row := range []struct {
+		level, msg string
+	}{
+		{"critical", "c"},
+		{"error", "e"},
+		{"warn", "w"},
+		{"info", "i"},
+		{"debug", "d"},
+	} {
+		if err := s.InsertLog(ctx, &models.LogEntry{
+			ServerID: srv.ID,
+			Ts:       base.Add(time.Duration(i) * time.Millisecond),
+			Source:   "t",
+			Level:    row.level,
+			Message:  row.msg,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	q := func(min string) int {
+		logs, err := s.QueryLogs(ctx, srv.ID, LogQueryOpts{SeverityMin: min, Limit: 20})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(logs)
+	}
+	if n := q("error"); n != 2 {
+		t.Fatalf("severity_min=error want 2 logs, got %d", n)
+	}
+	if n := q("warn"); n != 3 {
+		t.Fatalf("severity_min=warn want 3 logs, got %d", n)
+	}
+	if n := q("info"); n != 4 {
+		t.Fatalf("severity_min=info want 4 logs, got %d", n)
+	}
+	if n := q("debug"); n != 5 {
+		t.Fatalf("severity_min=debug want 5 logs, got %d", n)
+	}
+}
+
 func TestDeleteIngestedLogs(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()

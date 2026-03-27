@@ -7,7 +7,8 @@
   let servers: any[] = [];
   let selectedServer = '';
   let filter = '';
-  let level = 'all';
+  /** Stored log lines in DB: exact critical, or minimum severity (includes more severe). */
+  let logFilter: 'all' | 'critical' | 'min_error' | 'min_warn' | 'min_info' | 'min_debug' = 'all';
   let loading = false;
   let autoRefresh = true;
   let intervalId: any;
@@ -16,7 +17,14 @@
   let purgeSource = '';
   let purging = false;
 
-  const levels = ['all', 'error', 'warn', 'info', 'debug'];
+  const logFilterOptions: { id: typeof logFilter; label: string }[] = [
+    { id: 'all', label: 'All levels' },
+    { id: 'critical', label: 'Critical only' },
+    { id: 'min_error', label: 'Error or higher' },
+    { id: 'min_warn', label: 'Warning or higher' },
+    { id: 'min_info', label: 'Info or higher' },
+    { id: 'min_debug', label: 'Debug or higher' },
+  ];
 
   onMount(async () => {
     try {
@@ -38,11 +46,14 @@
     if (!selectedServer) return;
     loading = true;
     try {
-      const result = await api.getLogs(selectedServer, {
-        level: level !== 'all' ? level : undefined,
+      const q: Parameters<typeof api.getLogs>[1] = {
         search: filter || undefined,
         range: '24h',
-      });
+      };
+      if (logFilter === 'critical') q.level = 'critical';
+      else if (logFilter.startsWith('min_')) q.severity_min = logFilter.replace('min_', '') as 'error' | 'warn' | 'info' | 'debug';
+
+      const result = await api.getLogs(selectedServer, q);
       logs = result || [];
     } catch {
       logs = [];
@@ -53,6 +64,7 @@
 
   function levelColor(l: string): string {
     switch (l) {
+      case 'critical': return '#da3633';
       case 'error': return '#f85149';
       case 'warn': return '#d29922';
       case 'info': return '#58a6ff';
@@ -108,7 +120,7 @@
     }
   }
 
-  $: if (level || selectedServer) fetchLogs();
+  $: if (logFilter || selectedServer) fetchLogs();
 
   $: selectedServerHost = servers.find((s) => s.id === selectedServer)?.host ?? '';
 </script>
@@ -124,9 +136,9 @@
         {/each}
       </select>
       <input type="text" placeholder="Search logs..." bind:value={filter} on:input={fetchLogs} class="search" />
-      <select bind:value={level}>
-        {#each levels as l}
-          <option value={l}>{l === 'all' ? 'All levels' : l.toUpperCase()}</option>
+      <select bind:value={logFilter}>
+        {#each logFilterOptions as o}
+          <option value={o.id}>{o.label}</option>
         {/each}
       </select>
       <label class="auto-label">
@@ -135,6 +147,7 @@
     </div>
     </div>
     <p class="purge-hint">
+      Severity applies to <strong>stored</strong> lines (levels set when the agent ingested them). The Docker block below uses the same menu to filter <strong>raw</strong> container output by keywords.
       Lines here are a copy in TraceLog’s database. To free space or drop old history, purge below — original files on the server are unchanged.
       <a class="doc-ref" href="https://tudorAbrudan.github.io/traceLog/guide/logs-http-analytics" target="_blank" rel="noopener noreferrer">Docs: logs &amp; retention</a>
     </p>
@@ -160,7 +173,7 @@
   </div>
 
   {#if selectedServerHost === 'localhost'}
-    <DockerLogsPanel serverId={selectedServer} />
+    <DockerLogsPanel serverId={selectedServer} logFilter={logFilter} />
   {/if}
 
   <div class="log-viewer">

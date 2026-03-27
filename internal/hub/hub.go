@@ -118,6 +118,9 @@ func (h *Hub) IngestLog(ctx context.Context, entry *models.LogEntry) error {
 		return err
 	}
 	h.ingestLog.Add(1)
+	if h.alerts != nil {
+		h.alerts.EvaluateLog(ctx, entry.ServerID, entry.Level, entry.Source, entry.Message)
+	}
 	return nil
 }
 

@@ -7,6 +7,7 @@
   let selectedServer = '';
   let processes: any[] = [];
   let loading = true;
+  let refreshing = false;
   let sortBy = 'cpu_percent';
   let sortDir: 'asc' | 'desc' = 'desc';
 
@@ -27,12 +28,15 @@
     return () => clearInterval(interval);
   });
 
-  async function loadProcesses() {
+  async function loadProcesses(manual = false) {
     if (!selectedServer) return;
+    if (manual) refreshing = true;
     try {
       processes = await api.getProcesses(selectedServer, true);
     } catch (e) {
       console.error('Failed to load processes', e);
+    } finally {
+      if (manual) refreshing = false;
     }
   }
 
@@ -64,12 +68,21 @@
     <h2>Processes</h2>
     <div class="controls">
       {#if servers.length > 1}
-        <select bind:value={selectedServer} on:change={loadProcesses}>
+        <select bind:value={selectedServer} on:change={() => loadProcesses(false)}>
           {#each servers as s}
             <option value={s.id}>{s.name}</option>
           {/each}
         </select>
       {/if}
+      <button
+        type="button"
+        class="btn-refresh"
+        disabled={refreshing || !selectedServer}
+        on:click={() => loadProcesses(true)}
+        title="Refresh now"
+      >
+        {refreshing ? '…' : 'Refresh'}
+      </button>
       <span class="count">{processes.length} processes</span>
     </div>
   </div>
@@ -118,6 +131,18 @@
   h2 { margin: 0; font-size: 1.3rem; color: var(--text-primary); }
   .controls { display: flex; align-items: center; gap: 0.75rem; }
   .count { font-size: 0.8rem; color: var(--text-muted); }
+  .btn-refresh {
+    padding: 0.35rem 0.75rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    cursor: pointer;
+  }
+  .btn-refresh:hover:not(:disabled) { background: var(--bg-hover); }
+  .btn-refresh:disabled { opacity: 0.5; cursor: not-allowed; }
 
   select {
     background: var(--bg-secondary); color: var(--text-primary);

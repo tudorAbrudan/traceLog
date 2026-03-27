@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	osexec "os/exec"
 	"strings"
@@ -108,6 +109,14 @@ func cmdServe() {
 	h, err := hub.New(cfg)
 	if err != nil {
 		fatal("Failed to start hub: %v", err)
+	}
+
+	ctx := context.Background()
+	if ls, err := logSourcesForLocalAgent(ctx, h); err != nil {
+		slog.Warn("Could not load log sources from database", "error", err)
+	} else if len(ls) > 0 {
+		cfg.Collect.LogSources = ls
+		slog.Info("Using log sources from Settings (database)", "count", len(ls))
 	}
 
 	a, err := agent.New(cfg, agent.WithLocalHub(h))

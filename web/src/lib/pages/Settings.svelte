@@ -29,6 +29,15 @@
   let alertRules: any[] = [];
   let newAlertMetric = 'cpu_percent'; let newAlertOp = '>'; let newAlertThreshold = 90;
   let newAlertDuration = 300; let newAlertChannel = '';
+  /** Cooldown for log-based alerts (seconds). */
+  let newAlertLogCooldown = 1800;
+
+  const metricAlerts = ['cpu_percent', 'mem_percent', 'disk_percent', 'load_1', 'load_5', 'load_15'];
+  const logAlertMetrics = [
+    { id: 'log_critical', label: 'Ingested log · critical only' },
+    { id: 'log_error', label: 'Ingested log · error or critical' },
+    { id: 'log_warn', label: 'Ingested log · warn, error, or critical' },
+  ];
 
   const tabs = [
     { id: 'general', label: 'General' },
@@ -40,7 +49,10 @@
     { id: 'about', label: 'About' },
   ];
 
-  const metrics = ['cpu_percent', 'mem_percent', 'disk_percent', 'load_1', 'load_5', 'load_15'];
+  function isLogAlertMetric(m: string): boolean {
+    return m === 'log_critical' || m === 'log_error' || m === 'log_warn';
+  }
+
 
   /** JSON template for Gmail SMTP (matches hub EmailConfig: host, port, username, password, from, to, use_tls). */
   const gmailConfigTemplate = `{
@@ -160,10 +172,16 @@
   // Alerts
   async function addAlert() {
     try {
+      const log = isLogAlertMetric(newAlertMetric);
       await api.createAlertRule({
-        metric: newAlertMetric, operator: newAlertOp, threshold: newAlertThreshold,
-        duration_seconds: newAlertDuration, cooldown_seconds: 1800, channel_id: newAlertChannel,
-        server_id: '', enabled: true,
+        metric: newAlertMetric,
+        operator: log ? '>' : newAlertOp,
+        threshold: log ? 0 : newAlertThreshold,
+        duration_seconds: log ? 0 : newAlertDuration,
+        cooldown_seconds: log ? newAlertLogCooldown : 1800,
+        channel_id: newAlertChannel,
+        server_id: '',
+        enabled: true,
       });
       alertRules = (await api.listAlertRules()) || [];
     } catch (e: any) { alert('Failed: ' + e.message); }
@@ -212,6 +230,11 @@
       {:else if activeTab === 'logs'}
         <div class="section">
           <h3>Log Sources</h3>
+          <p class="hint">
+            In <strong>serve</strong> mode (hub + agent on the same machine), sources listed here are loaded from the database when TraceLog starts.
+            <strong>Restart the TraceLog service</strong> after you add, remove, or change a source (e.g. <code>sudo systemctl restart tracelog</code>).
+            The agent <strong>tails from the end of each file</strong> — only lines written <em>after</em> it starts appear under Logs; generate new HTTP traffic for nginx access logs to show up in HTTP Analytics.
+          </p>
           <p class="hint">Scan checks this server for usual paths (nginx, apache, syslog, etc.) and adds only files that exist. Format is set per file type (e.g. nginx for access logs).</p>
           <button class="btn-secondary" on:click={scanLogs}>Scan for common log files</button>
           <div class="add-form">
@@ -324,23 +347,42 @@
       {:else if activeTab === 'alerts'}
         <div class="section">
           <h3>Alert Rules</h3>
-          <p class="hint">Evaluated on incoming system metrics. If the metric stays beyond the threshold for the <strong>duration</strong>, a notification is sent to the chosen channel (after cooldown). Pick a channel from <strong>Notifications</strong> first.</p>
-          <div class="add-form alert-form">
-            <select bind:value={newAlertMetric}>
-              {#each metrics as m}<option value={m}>{m}</option>{/each}
+          <p class="hint">
+            <strong>Metrics:</strong> if a value stays beyond the threshold for the <strong>duration</strong>, a notification is sent (then <strong>cooldown</strong> applies).
+            <strong> Ingested logs:</strong> each line stored in TraceLog (files, Apache/nginx as plain, app logs, etc.) is classified; when level matches the rule, notify immediately (cooldown only — no duration).
+            Docker stdout is only covered if those lines are ingested into TraceLog the same way; raw <em>Load logs</em> in the UI is not stored and does not trigger alerts.
+          </p>
+          <div class="add-form alert-form" class:alert-form-log={isLogAlertMetric(newAlertMetric)}>
+            <select bind:value={newAlertMetric} class="alert-metric-select">
+              <optgroup label="System metrics">
+                {#each metricAlerts as m}<option value={m}>{m}</option>{/each}
+              </optgroup>
+              <optgroup label="Ingested log level">
+                {#each logAlertMetrics as lm}<option value={lm.id}>{lm.label}</option>{/each}
+              </optgroup>
             </select>
-            <select bind:value={newAlertOp}>
-              <option value=">">{'>'}</option>
-              <option value=">=">{'>='}</option>
-              <option value="<">{'<'}</option>
-            </select>
-            <input type="number" bind:value={newAlertThreshold} min="0" max="100" style="width:80px" />
-            <span class="hint-inline">for</span>
-            <select bind:value={newAlertDuration}>
-              <option value={60}>1 min</option>
-              <option value={300}>5 min</option>
-              <option value={600}>10 min</option>
-            </select>
+            {#if !isLogAlertMetric(newAlertMetric)}
+              <select bind:value={newAlertOp}>
+                <option value=">">{'>'}</option>
+                <option value=">=">{'>='}</option>
+                <option value="<">{'<'}</option>
+              </select>
+              <input type="number" bind:value={newAlertThreshold} min="0" max="100" style="width:80px" />
+              <span class="hint-inline">for</span>
+              <select bind:value={newAlertDuration}>
+                <option value={60}>1 min</option>
+                <option value={300}>5 min</option>
+                <option value={600}>10 min</option>
+              </select>
+            {:else}
+              <span class="hint-inline">cooldown</span>
+              <select bind:value={newAlertLogCooldown}>
+                <option value={300}>5 min</option>
+                <option value={900}>15 min</option>
+                <option value={1800}>30 min</option>
+                <option value={3600}>1 h</option>
+              </select>
+            {/if}
             <span class="hint-inline">notify</span>
             <select bind:value={newAlertChannel}>
               <option value="">None</option>
@@ -355,8 +397,14 @@
               {#each alertRules as rule (rule.id)}
                 <div class="item-row">
                   <div>
-                    <strong>{rule.metric} {rule.operator} {rule.threshold}</strong>
-                    <span class="item-detail">Duration: {rule.duration_seconds}s | Cooldown: {rule.cooldown_seconds}s</span>
+                    <strong>{isLogAlertMetric(rule.metric) ? (logAlertMetrics.find((x) => x.id === rule.metric)?.label ?? rule.metric) : `${rule.metric} ${rule.operator} ${rule.threshold}`}</strong>
+                    <span class="item-detail">
+                      {#if isLogAlertMetric(rule.metric)}
+                        Cooldown: {Math.round((rule.cooldown_seconds ?? 0) / 60)} min between notifications
+                      {:else}
+                        Must hold {rule.duration_seconds}s · Cooldown {Math.round((rule.cooldown_seconds ?? 0) / 60)} min
+                      {/if}
+                    </span>
                   </div>
                   <button class="btn-delete" on:click={() => removeAlert(rule.id)}>Delete</button>
                 </div>
@@ -373,7 +421,7 @@
 
           <h4 class="subhead">Database backup</h4>
           <p class="hint">
-            Download a SQLite snapshot of this hub’s data (same idea as <code>VACUUM INTO</code> / CLI backup). Enter your TraceLog password to confirm.
+            Download a SQLite snapshot of <strong>TraceLog’s own hub database</strong> (metrics, log copies, users — same idea as <code>VACUUM INTO</code> / CLI <code>tracelog backup</code>). Enter your <strong>TraceLog login</strong> password to confirm. This is not a dump of an external app database (MySQL, Postgres, etc.).
           </p>
           {#if exportErr}
             <p class="export-err">{exportErr}</p>
@@ -483,5 +531,14 @@
   .about-item { display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
   .about-item span { color: var(--text-muted); }
   .about-item strong, .about-item a { color: var(--text-primary); }
-  @media (max-width: 768px) { .settings-layout { flex-direction: column; } .settings-nav { flex-direction: row; overflow-x: auto; min-width: auto; } }
+  .alert-metric-select { min-width: 200px; max-width: 100%; flex: 1 1 220px; }
+  .alert-form-log { align-items: flex-end; }
+  @media (max-width: 900px) {
+    .settings { padding: 1rem 0.5rem; }
+    .settings-layout { flex-direction: column; gap: 0.75rem; }
+    .settings-nav { flex-direction: row; flex-wrap: wrap; overflow-x: auto; min-width: auto; }
+    .settings-nav button { font-size: 0.78rem; padding: 0.45rem 0.55rem; }
+    .settings-content { padding: 1rem; }
+    .item-row { flex-direction: column; align-items: flex-start; gap: 0.5rem; }
+  }
 </style>

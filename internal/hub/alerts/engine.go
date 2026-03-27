@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -66,11 +67,14 @@ func (e *Engine) RemoveRule(id string) {
 }
 
 func (e *Engine) Evaluate(ctx context.Context, serverID string, metrics *models.SystemMetrics) {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
+	e.mu.Lock()
+	defer e.mu.Unlock()
 
 	for _, rule := range e.rules {
 		if !rule.Enabled || rule.ServerID != serverID {
+			continue
+		}
+		if IsLogMetricRule(rule.Metric) {
 			continue
 		}
 
@@ -83,7 +87,17 @@ func (e *Engine) Evaluate(ctx context.Context, serverID string, metrics *models.
 			}
 			violationStart := e.violations[rule.ID]
 			if time.Since(violationStart) >= time.Duration(rule.DurationS)*time.Second {
-				e.fireAlert(ctx, rule, value)
+				e.doFireUnlocked(ctx, rule, func() *Alert {
+					return &Alert{
+						RuleID:    rule.ID,
+						ServerID:  rule.ServerID,
+						Metric:    rule.Metric,
+						Value:     value,
+						Threshold: rule.Threshold,
+						FiredAt:   time.Now().UTC(),
+						Message:   fmt.Sprintf("%s is %.1f (threshold: %s %.1f)", rule.Metric, value, rule.Operator, rule.Threshold),
+					}
+				}, "Metric alert fired", "rule", rule.ID, "metric", rule.Metric, "value", value, "threshold", rule.Threshold)
 			}
 		} else {
 			delete(e.violations, rule.ID)
@@ -91,37 +105,73 @@ func (e *Engine) Evaluate(ctx context.Context, serverID string, metrics *models.
 	}
 }
 
-func (e *Engine) fireAlert(ctx context.Context, rule *Rule, value float64) {
+// EvaluateLog runs log-based rules when a line is stored (any source: files, apache, docker→ingested, etc.).
+func (e *Engine) EvaluateLog(ctx context.Context, serverID, level, source, message string) {
+	var matches []*Rule
+	e.mu.RLock()
+	for _, rule := range e.rules {
+		if !rule.Enabled {
+			continue
+		}
+		if rule.ServerID != "" && rule.ServerID != serverID {
+			continue
+		}
+		if !IsLogMetricRule(rule.Metric) || !LogLevelMatches(rule.Metric, level) {
+			continue
+		}
+		r := rule
+		matches = append(matches, r)
+	}
+	e.mu.RUnlock()
+
+	for _, rule := range matches {
+		e.fireLogAlert(ctx, rule, level, source, message)
+	}
+}
+
+func (e *Engine) fireLogAlert(ctx context.Context, rule *Rule, level, source, msg string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	preview := strings.TrimSpace(msg)
+	if len([]rune(preview)) > 400 {
+		preview = string([]rune(preview)[:400]) + "…"
+	}
+	e.doFireUnlocked(ctx, rule, func() *Alert {
+		return &Alert{
+			RuleID:    rule.ID,
+			ServerID:  rule.ServerID,
+			Metric:    rule.Metric,
+			Value:     0,
+			Threshold: 0,
+			FiredAt:   time.Now().UTC(),
+			Message:   fmt.Sprintf("Ingested log level=%s source=%q: %s", level, source, preview),
+		}
+	}, "Log alert fired", "rule", rule.ID, "metric", rule.Metric, "level", level, "source", source)
+}
+
+// doFireUnlocked requires e.mu locked (Evaluate path) or is called from fireLogAlert after Lock.
+func (e *Engine) doFireUnlocked(ctx context.Context, rule *Rule, buildAlert func() *Alert, warnMsg string, warnKV ...any) {
 	lastFired, ok := e.lastFired[rule.ID]
 	cooldown := time.Duration(rule.CooldownS) * time.Second
 	if cooldown == 0 {
 		cooldown = 5 * time.Minute
 	}
-
 	if ok && time.Since(lastFired) < cooldown {
 		return
 	}
 
-	alert := &Alert{
-		RuleID:    rule.ID,
-		ServerID:  rule.ServerID,
-		Metric:    rule.Metric,
-		Value:     value,
-		Threshold: rule.Threshold,
-		FiredAt:   time.Now().UTC(),
-		Message:   fmt.Sprintf("%s is %.1f (threshold: %s %.1f)", rule.Metric, value, rule.Operator, rule.Threshold),
-	}
-
-	slog.Warn("Alert fired", "rule", rule.ID, "metric", rule.Metric, "value", value, "threshold", rule.Threshold)
+	alert := buildAlert()
+	slog.Warn(warnMsg, warnKV...)
 
 	e.lastFired[rule.ID] = time.Now()
 
-	if e.notifyFunc != nil && rule.ChannelID != "" {
-		go func() {
-			if err := e.notifyFunc(ctx, rule.ChannelID, alert); err != nil {
-				slog.Error("Failed to send alert notification", "error", err, "channel", rule.ChannelID)
+	ch := rule.ChannelID
+	if e.notifyFunc != nil && ch != "" {
+		go func(a *Alert, channelID string) {
+			if err := e.notifyFunc(ctx, channelID, a); err != nil {
+				slog.Error("Failed to send alert notification", "error", err, "channel", channelID)
 			}
-		}()
+		}(alert, ch)
 	}
 }
 

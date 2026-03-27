@@ -42,6 +42,18 @@ html, body {
   background: var(--bg-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+@media (max-width: 900px) {
+  .table-wrap,
+  .log-viewer,
+  [class*="charts-grid"],
+  [class*="tables-row"] {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    max-width: 100%;
+  }
 }
 
 a {

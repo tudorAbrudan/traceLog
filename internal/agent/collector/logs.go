@@ -100,6 +100,24 @@ func parseNginxAccessLog(src models.LogSource, line string) *models.AccessLogEnt
 	}
 }
 
+// applyPlainSeverity sets level from common keywords (plain, apache, docker-style text, etc.).
+func applyPlainSeverity(line string, entry *models.LogEntry) {
+	lower := strings.ToLower(line)
+	switch {
+	case strings.Contains(lower, "panic"):
+		entry.Level = "critical"
+	case strings.Contains(lower, "fatal") || strings.Contains(lower, "critical") ||
+		strings.Contains(lower, "emerg") || strings.Contains(lower, "alert"):
+		entry.Level = "critical"
+	case strings.Contains(lower, "error"):
+		entry.Level = "error"
+	case strings.Contains(lower, "warn"):
+		entry.Level = "warn"
+	case strings.Contains(lower, "debug"):
+		entry.Level = "debug"
+	}
+}
+
 func parseLine(src models.LogSource, line string) *models.LogEntry {
 	if strings.TrimSpace(line) == "" {
 		return nil
@@ -123,17 +141,13 @@ func parseLine(src models.LogSource, line string) *models.LogEntry {
 			} else if strings.HasPrefix(matches[5], "4") {
 				entry.Level = "warn"
 			}
+		} else {
+			applyPlainSeverity(line, entry)
 		}
-	case "plain":
-		lower := strings.ToLower(line)
-		switch {
-		case strings.Contains(lower, "error") || strings.Contains(lower, "fatal") || strings.Contains(lower, "crit"):
-			entry.Level = "error"
-		case strings.Contains(lower, "warn"):
-			entry.Level = "warn"
-		case strings.Contains(lower, "debug"):
-			entry.Level = "debug"
-		}
+	case "plain", "apache":
+		applyPlainSeverity(line, entry)
+	default:
+		applyPlainSeverity(line, entry)
 	}
 
 	return entry

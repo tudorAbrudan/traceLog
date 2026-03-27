@@ -29,6 +29,19 @@ func (s *Store) QueryLogs(ctx context.Context, serverID string, opts LogQueryOpt
 	if opts.Level != "" {
 		query += " AND level = ?"
 		args = append(args, opts.Level)
+	} else if thr, ok := logSeverityThreshold(opts.SeverityMin); ok {
+		// Rank: critical=5 … debug=1; show rows at least as severe as the chosen floor.
+		query += ` AND (
+			CASE level
+				WHEN 'critical' THEN 5
+				WHEN 'error' THEN 4
+				WHEN 'warn' THEN 3
+				WHEN 'info' THEN 2
+				WHEN 'debug' THEN 1
+				ELSE 2
+			END
+		) >= ?`
+		args = append(args, thr)
 	}
 	if opts.Search != "" {
 		query += " AND message LIKE ?"
@@ -99,10 +112,27 @@ func (s *Store) DeleteIngestedLogs(ctx context.Context, serverID, source string,
 }
 
 type LogQueryOpts struct {
-	Source string
-	Level  string
-	Search string
-	Since  time.Time
-	Limit  int
+	Source      string
+	Level       string // exact match, e.g. critical
+	SeverityMin string // error|warn|info|debug — minimum severity (includes more severe levels)
+	Search      string
+	Since       time.Time
+	Limit       int
+}
+
+// logSeverityThreshold maps severity_min query to numeric floor (critical=5 down to debug=1).
+func logSeverityThreshold(s string) (int, bool) {
+	switch s {
+	case "error":
+		return 4, true
+	case "warn":
+		return 3, true
+	case "info":
+		return 2, true
+	case "debug":
+		return 1, true
+	default:
+		return 0, false
+	}
 }
 

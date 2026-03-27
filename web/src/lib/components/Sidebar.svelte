@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { currentPage, user, darkMode, suppressSingleServerAutoOpen } from '../store';
+  import { currentPage, user, darkMode, suppressSingleServerAutoOpen, navDrawerOpen } from '../store';
   import { api } from '../api';
 
   function toggleTheme() {
@@ -63,7 +63,8 @@
 <style>
   .sidebar {
     width: 220px;
-    height: 100vh;
+    height: 100dvh;
+    min-height: 100vh;
     background: var(--bg-secondary);
     border-right: 1px solid var(--border);
     display: flex;
@@ -71,6 +72,8 @@
     position: fixed;
     left: 0;
     top: 0;
+    z-index: 200;
+    transition: transform 0.2s ease;
   }
   .sidebar-header {
     padding: 1.25rem 1rem;
@@ -151,4 +154,22 @@
     font-size: 0.75rem;
   }
   .logout:hover { background: var(--bg-hover); color: #f85149; border-color: #f8514944; }
+
+  @media (max-width: 900px) {
+    .sidebar {
+      width: min(280px, 88vw);
+      transform: translateX(-100%);
+      box-shadow: 8px 0 32px rgba(0, 0, 0, 0.25);
+    }
+    :global(.app-layout.drawer-open) .sidebar {
+      transform: translateX(0);
+    }
+    nav button {
+      min-height: 44px;
+      font-size: 0.9rem;
+    }
+    .logout {
+      min-height: 44px;
+    }
+  }
 </style>

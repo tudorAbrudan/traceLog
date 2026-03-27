@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { currentPage } from '../store';
+  import { currentPage, navDrawerOpen } from '../store';
   import { api } from '../api';
 
   export let server: any;
@@ -25,6 +25,7 @@
 
   function openDetail() {
     currentPage.set(`server:${server.id}`);
+    navDrawerOpen.set(false);
   }
 
   function timeSince(dateStr: string): string {

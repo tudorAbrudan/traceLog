@@ -160,7 +160,9 @@
   {#if loading}
     <div class="status-msg">Loading analytics...</div>
   {:else if !stats || stats.total_requests === 0}
-    <div class="status-msg">No HTTP request data yet. Configure nginx access log monitoring in Settings to see data.</div>
+    <div class="status-msg">
+      No HTTP request data in this range. Add your nginx (or apache) <strong>access</strong> log under Settings → Log Sources with format <strong>nginx</strong> (or apache), then <strong>restart TraceLog</strong> so the agent tails the file. Only requests logged <em>after</em> the restart are ingested; try hitting your site to generate new lines.
+    </div>
   {:else}
     <div class="page-intro">
       <strong>IP rankings</strong> are on this page (sidebar: <strong>HTTP Analytics</strong>). Use the time range above.

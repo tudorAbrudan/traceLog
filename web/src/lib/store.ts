@@ -15,3 +15,6 @@ export const currentPage = writable('overview');
 
 /** When true, Overview shows the server grid even if there is only one server (user opened Overview or pressed Back). */
 export const suppressSingleServerAutoOpen = writable(false);
+
+/** Mobile nav drawer open (sidebar off-canvas). */
+export const navDrawerOpen = writable(false);

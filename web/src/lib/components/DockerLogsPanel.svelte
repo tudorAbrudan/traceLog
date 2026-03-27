@@ -3,6 +3,8 @@
   import { api } from '../api';
 
   export let serverId = '';
+  /** Same values as Logs page — filters loaded container output client-side (keyword heuristics). */
+  export let logFilter: 'all' | 'critical' | 'min_error' | 'min_warn' | 'min_info' | 'min_debug' = 'all';
 
   let dockerRows: any[] = [];
   let selectedContainer = '';
@@ -52,6 +54,33 @@
 
   $: dockerList = uniqueContainers(dockerRows);
 
+  function dockerLineRank(line: string): number {
+    const t = line;
+    if (/\b(FATAL|CRITICAL|PANIC|EMERG)\b/i.test(t)) return 5;
+    if (/\b(ERROR)\b|\] ERROR\b|level=error\b/i.test(t)) return 4;
+    if (/\b(WARN|WARNING)\b|\] WARN\b|level=warn/i.test(t)) return 3;
+    if (/\b(DEBUG|DBG)\b|\] DEBUG\b|level=debug/i.test(t)) return 1;
+    if (/\b(INFO)\b|\] INFO\b|level=info/i.test(t)) return 2;
+    return 2;
+  }
+
+  function dockerLineIncluded(line: string, f: typeof logFilter): boolean {
+    if (f === 'all') return true;
+    const r = dockerLineRank(line);
+    if (f === 'critical') return r === 5;
+    const thr: Record<string, number> = { min_error: 4, min_warn: 3, min_info: 2, min_debug: 1 };
+    const t = thr[f];
+    return t !== undefined && r >= t;
+  }
+
+  $: dockerDisplayed =
+    !dockerLogs || logFilter === 'all'
+      ? dockerLogs
+      : dockerLogs
+          .split('\n')
+          .filter((ln) => dockerLineIncluded(ln, logFilter))
+          .join('\n');
+
   $: if (serverId) {
     void refreshDockerMetrics();
   }
@@ -65,7 +94,8 @@
 <div class="docker-logs-panel">
   <div class="card-head docker-head">
     <h3>Docker container logs</h3>
-    <span class="hint">Runs <code>docker logs</code> on the machine for this local server (same as the agent host).</span>
+    <span class="hint"
+      >Runs <code>docker logs</code> on the machine for this local server (same as the agent host). The Logs page severity control filters these lines by keywords (not DB levels).</span>
   </div>
   {#if dockerList.length === 0}
     <p class="docker-empty">No container metrics yet. Enable Docker collection and wait for the next scrape.</p>
@@ -87,7 +117,11 @@
       <pre class="docker-err">{dockerLogsErr}</pre>
     {/if}
     {#if dockerLogs}
-      <pre class="docker-log-out">{dockerLogs}</pre>
+      {#if logFilter !== 'all' && !dockerDisplayed?.trim()}
+        <p class="docker-filter-empty">No lines match the current severity filter.</p>
+      {:else}
+        <pre class="docker-log-out">{dockerDisplayed}</pre>
+      {/if}
     {/if}
   {/if}
 </div>
@@ -185,5 +219,10 @@
   .docker-err {
     color: var(--danger);
     border-color: #f8514944;
+  }
+  .docker-filter-empty {
+    margin: 0;
+    font-size: 0.8rem;
+    color: var(--text-muted);
   }
 </style>

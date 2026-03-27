@@ -91,10 +91,21 @@ export const api = {
   deleteServer: (id: string) => request('DELETE', `/servers/${id}`),
 
   // Logs
-  getLogs: (serverId: string, opts: { source?: string; level?: string; search?: string; range?: string } = {}) => {
+  getLogs: (
+    serverId: string,
+    opts: {
+      source?: string;
+      level?: string;
+      /** Minimum severity: error|warn|info|debug (includes more severe levels). */
+      severity_min?: string;
+      search?: string;
+      range?: string;
+    } = {},
+  ) => {
     const params = new URLSearchParams({ server_id: serverId });
     if (opts.source) params.set('source', opts.source);
     if (opts.level && opts.level !== 'all') params.set('level', opts.level);
+    if (opts.severity_min && opts.severity_min !== 'all') params.set('severity_min', opts.severity_min);
     if (opts.search) params.set('search', opts.search);
     if (opts.range) params.set('range', opts.range);
     return request('GET', `/logs?${params}`);

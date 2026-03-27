@@ -256,9 +256,14 @@ func (h *Hub) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	opts := store.LogQueryOpts{
 		Source: r.URL.Query().Get("source"),
-		Level:  r.URL.Query().Get("level"),
 		Search: r.URL.Query().Get("search"),
 		Limit:  500,
+	}
+	if lv := strings.TrimSpace(r.URL.Query().Get("level")); lv != "" {
+		opts.Level = lv
+	}
+	if sm := strings.TrimSpace(r.URL.Query().Get("severity_min")); sm != "" && opts.Level == "" {
+		opts.SeverityMin = sm
 	}
 	if rangeStr := r.URL.Query().Get("range"); rangeStr != "" {
 		if d, err := parseRange(rangeStr); err == nil {
