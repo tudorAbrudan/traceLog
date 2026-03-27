@@ -4,6 +4,12 @@ All notable changes to TraceLog are documented here. The format is loosely based
 
 ## [Unreleased]
 
+## [v0.2.8] - 2026-03-27
+
+### Fixed
+
+- **CI / lint:** document and suppress gosec **G202** (SQL string concatenation) for HTTP analytics aggregate queries in `internal/hub/store/accesslogs.go`, where the dynamic `WHERE` clause uses only fixed SQL fragments plus `INSTR(…, ?)` patterns with bound arguments.
+
 ## [v0.2.7] - 2026-03-28
 
 ### Fixed

@@ -80,6 +80,8 @@ type IPBadCount struct {
 
 // GetAccessLogStats aggregates HTTP access data. topN controls top paths, IPs, method+paths, and bad-by-IP rows (clamped 5–100).
 // excludeUASubstrings removes matching User-Agent rows from all aggregates (e.g. TraceLog’s own uptime probes).
+//
+//nolint:gosec // G202: baseWhere is `server_id = ? AND ts >= ?` plus accessUAExcludeSQL output (fixed INSTR… fragments only); UA substrings are bound as args.
 func (s *Store) GetAccessLogStats(ctx context.Context, serverID string, since time.Time, topN int, excludeUASubstrings []string) (*AccessLogStats, error) {
 	if topN < 5 {
 		topN = 5
@@ -203,6 +205,8 @@ func (s *Store) GetAccessLogStats(ctx context.Context, serverID string, since ti
 }
 
 // GetAccessLogTopIPCounts returns IPs ordered by request count (for blacklist estimation).
+//
+//nolint:gosec // G202: same WHERE construction as GetAccessLogStats (accessUAExcludeSQL + bound args).
 func (s *Store) GetAccessLogTopIPCounts(ctx context.Context, serverID string, since time.Time, limit int, excludeUASubstrings []string) ([]IPCount, error) {
 	if limit <= 0 {
 		limit = 15000
