@@ -7,6 +7,16 @@ The TraceLog agent can scrape `docker stats` and send samples to the hub. The UI
 - **Servers →** open a server **→ Docker & container logs** lists containers for that server (any host where the agent reports Docker metrics).
 - From **Logs**, use **Open … → Docker** to jump to the same section on that server’s detail page.
 
+Doc screenshots redact container names and raw log lines.
+
+**Dark theme**
+
+![Docker table and log viewer (dark)](/screenshots/docker.png)
+
+**Light theme**
+
+![Docker table and log viewer (light)](/screenshots/docker-light.png)
+
 On-demand **Load logs** reads stdout/stderr via the agent and does **not** store lines in the database, so it does **not** drive log-based alerts.
 
 ## Alerts on Docker metrics

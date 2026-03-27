@@ -2,6 +2,10 @@
 
 TraceLog supports configurable alert rules that trigger notifications via email or webhooks.
 
+**Settings → Alerts** — metric dropdown (system, Docker, ingested log levels). Example UI (audit rows redacted):
+
+![Alert rules and metric types](/screenshots/alerts.png)
+
 ## Alert Rules
 
 Create rules in Settings → Alerts. Each rule defines:

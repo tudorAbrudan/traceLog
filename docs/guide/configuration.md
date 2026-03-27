@@ -89,6 +89,16 @@ Alert bodies include **server name**, **registered host** (if set in Settings â†
 
 (include path prefix if you use `--url-prefix` / `TRACELOG_URL_PREFIX`).
 
+### Log Sources (UI)
+
+![Settings â€” Log Sources, scan and per-source ingest levels](/screenshots/log-sources.png)
+
+### Uptime (sidebar)
+
+HTTP checks run from the **hub**. Monitor cards and history strip (target URLs redacted in this screenshot):
+
+![Uptime monitors](/screenshots/uptime.png)
+
 ## Data Storage
 
 All data is stored in a SQLite database at `{data-dir}/tracelog.db` using WAL mode for concurrent reads.

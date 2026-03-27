@@ -4,6 +4,13 @@ All notable changes to TraceLog are documented here. The format is loosely based
 
 ## [Unreleased]
 
+## [v0.2.11] - 2026-03-27
+
+### Added
+
+- **Documentation & presentation:** redacted dashboard screenshots under **`docs/public/screenshots/`** (Overview, Servers, Logs, Docker dark/light, Processes, Alerts, Log Sources, Uptime). **`scripts/redact_doc_screenshots.py`** regenerates them from raw PNG exports (sensitive regions obscured).
+- **VitePress home** hero image; guide pages and **README** embed the same assets with captions noting sanitization.
+
 ## [v0.2.10] - 2026-03-27
 
 ### Added

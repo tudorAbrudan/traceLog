@@ -2,6 +2,10 @@
 
 This page explains how TraceLog handles **application/text logs**, **ingested copies vs files on disk**, **retention**, **HTTP access analytics**, and the **IP blacklist** (analytics only).
 
+**Logs** page — filters, server scope, and purge (stored lines redacted in this screenshot):
+
+![Logs viewer and purge controls](/screenshots/logs.png)
+
 ## Log Sources (Settings → Log Sources)
 
 - **What it does:** Tells the agent which files to tail. Parsed lines are sent to the hub and stored in SQLite (`logs` table). The **Logs** page shows that stored copy, not a live `tail -f` of the file handle.

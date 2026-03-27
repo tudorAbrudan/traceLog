@@ -18,6 +18,14 @@ The **hub** stores data and serves the UI. It does **not** poll other machines. 
 └──────────────┘                   └──────────────┘
 ```
 
+**Overview — server cards** (sensitive fields redacted in doc images):
+
+![Server cards on the hub Overview](/screenshots/servers.png)
+
+**Logs — per-server dropdown** (log table redacted):
+
+![Logs page with server selector](/screenshots/logs.png)
+
 ## What you configure where
 
 ### On each **monitored** server (remote host)

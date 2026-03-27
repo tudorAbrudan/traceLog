@@ -16,6 +16,10 @@ This page describes what TraceLog is **for**, what it **does today**, and how to
 
 So: **monitoring + log ingestion + alerting + silencing noisy known messages** matches the product direction. Gaps and nuances are called out below.
 
+**Processes** (Linux) — host-focused list; cgroup-heavy workloads are de-emphasized. Use **Overview → server → Docker** for containers.
+
+![Processes page with Linux cgroup note](/screenshots/processes.png)
+
 ## New Docker containers after install — are they detected automatically?
 
 **Yes.** The agent does **not** keep a fixed list of containers. On each collection cycle it runs `docker stats` (no stream) and reports **every running container** returned by Docker at that moment.

@@ -189,6 +189,20 @@ server {
 
 ## Dashboard
 
+Screenshots below use **sanitized** exports (hosts, URLs, log lines, container names, and similar details are redacted) for safe use in docs and README. To refresh them from new raw captures, run `python3 scripts/redact_doc_screenshots.py /path/to/raw/pngs` (see script for expected filename fragments).
+
+| Overview — metrics & charts | Servers — multi-host cards |
+|----------------------------|----------------------------|
+| ![Overview dashboard](docs/public/screenshots/overview.png) | ![Servers list](docs/public/screenshots/servers.png) |
+
+| Logs — search & purge (stored copy) | Docker — container stats & on-demand logs |
+|-------------------------------------|---------------------------------------------|
+| ![Logs page](docs/public/screenshots/logs.png) | ![Docker section](docs/public/screenshots/docker.png) |
+
+| Uptime — HTTP checks from the hub | Settings — alert rule types |
+|-----------------------------------|-----------------------------|
+| ![Uptime monitors](docs/public/screenshots/uptime.png) | ![Alerts settings](docs/public/screenshots/alerts.png) |
+
 The web dashboard provides:
 
 - **Overview** — Server cards with status indicators

@@ -7,6 +7,9 @@ hero:
   name: TraceLog
   text: Server Monitoring Platform
   tagline: Lightweight, single-binary server monitoring with a beautiful dashboard.
+  image:
+    src: /screenshots/overview.png
+    alt: TraceLog dashboard with CPU, memory, and disk charts
   actions:
     - theme: brand
       text: Get Started
