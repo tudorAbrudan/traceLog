@@ -48,7 +48,7 @@
     let interval: ReturnType<typeof setInterval> | undefined;
     void (async () => {
       try {
-        servers = await api.listServers();
+        servers = (await api.listServers()) ?? [];
         if (servers.length > 0) {
           const ctx = get(contextServerId);
           if (ctx && servers.some((s) => s.id === ctx)) {
@@ -112,11 +112,11 @@
     if (!selectedServer) return;
     badLoading = true;
     try {
-      badLogs = await api.getAccessBadRequests(selectedServer, {
+      badLogs = (await api.getAccessBadRequests(selectedServer, {
         range: range_,
         ip: badFilterIP.trim() || undefined,
         limit: 200,
-      });
+      })) ?? [];
     } catch {
       badLogs = [];
     } finally {
@@ -129,11 +129,11 @@
     slowLoading = true;
     try {
       const min = Math.max(1, Math.min(3_600_000, Number(slowMinMs) || 500));
-      slowLogs = await api.getAccessSlowRequests(selectedServer, {
+      slowLogs = (await api.getAccessSlowRequests(selectedServer, {
         range: range_,
         min_ms: min,
         limit: 200,
-      });
+      })) ?? [];
     } catch {
       slowLogs = [];
     } finally {

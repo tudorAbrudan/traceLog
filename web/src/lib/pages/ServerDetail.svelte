@@ -28,10 +28,12 @@
   async function loadData() {
     if (firstLoad) loading = true;
     try {
-      [server, metrics] = await Promise.all([
+      const [srv, mtx] = await Promise.all([
         api.getServer(serverId),
         api.getMetrics(serverId, range_),
       ]);
+      server = srv;
+      metrics = mtx ?? [];
     } catch (e) {
       console.error('Failed to load server:', e);
     } finally {

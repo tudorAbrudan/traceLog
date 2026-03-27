@@ -18,7 +18,7 @@
   onMount(() => {
     void (async () => {
       try {
-        servers = await api.listServers();
+        servers = (await api.listServers()) ?? [];
         if (servers.length > 0) {
           const ctx = get(contextServerId);
           if (ctx && servers.some((s) => s.id === ctx)) {
@@ -43,7 +43,7 @@
     if (!selectedServer) return;
     if (manual) refreshing = true;
     try {
-      processes = await api.getProcesses(selectedServer, true);
+      processes = (await api.getProcesses(selectedServer, true)) ?? [];
     } catch (e) {
       loadError = (e as Error).message || 'Failed to load processes';
     } finally {
