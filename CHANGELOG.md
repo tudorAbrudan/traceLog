@@ -4,6 +4,12 @@ All notable changes to TraceLog are documented here. The format is loosely based
 
 ## [Unreleased]
 
+## [v0.2.15] - 2026-03-27
+
+### Fixed
+
+- **Runtime crash on null API responses:** Go nil slices marshal to JSON `null`; pages that called `.length` on the result would crash mid-render when a server had no metrics, processes, or access logs in the selected range. Added `?? []` null guards in `ServerDetail`, `Processes`, `HttpAnalytics`, and `Logs`.
+
 ## [v0.2.14] - 2026-03-27
 
 ### Added
