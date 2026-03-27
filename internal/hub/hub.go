@@ -244,6 +244,7 @@ func (h *Hub) registerRoutes() {
 	// Protected routes (require session)
 	h.mux.HandleFunc("POST /api/auth/logout", auth(h.handleLogout))
 	h.mux.HandleFunc("GET /api/auth/me", auth(h.handleMe))
+	h.mux.HandleFunc("POST /api/database/export", auth(csrf(h.handleDatabaseExport)))
 
 	// Servers
 	h.mux.HandleFunc("GET /api/servers", auth(h.handleListServers))

@@ -40,6 +40,21 @@ func (s *Store) CreateUser(ctx context.Context, username, password string) (*mod
 	}, nil
 }
 
+// GetUserByID loads the user including password_hash (for server-side verification only).
+func (s *Store) GetUserByID(ctx context.Context, id string) (*models.User, error) {
+	var u models.User
+	var created string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id, username, password_hash, created_at
+		FROM users WHERE id = ?`, id,
+	).Scan(&u.ID, &u.Username, &u.PasswordHash, &created)
+	if err != nil {
+		return nil, fmt.Errorf("user id %q: %w", id, err)
+	}
+	u.CreatedAt, _ = time.Parse(time.RFC3339, created)
+	return &u, nil
+}
+
 func (s *Store) GetUserByUsername(ctx context.Context, username string) (*models.User, error) {
 	var u models.User
 	var created string

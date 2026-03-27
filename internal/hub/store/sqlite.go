@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -249,7 +250,8 @@ CREATE INDEX IF NOT EXISTS idx_process_metrics_server_ts ON process_metrics(serv
 `
 
 func (s *Store) Backup(ctx context.Context, destPath string) error {
-	_, err := s.db.ExecContext(ctx, fmt.Sprintf("VACUUM INTO '%s'", destPath))
+	escaped := strings.ReplaceAll(destPath, "'", "''")
+	_, err := s.db.ExecContext(ctx, fmt.Sprintf("VACUUM INTO '%s'", escaped))
 	if err != nil {
 		return fmt.Errorf("backup database: %w", err)
 	}

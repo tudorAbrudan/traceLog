@@ -49,6 +49,7 @@
         {loading ? 'Signing in...' : 'Sign in'}
       </button>
     </form>
+    <p class="rate-hint">Five failed sign-ins within one minute from your IP can block further attempts for about 15 minutes.</p>
   </div>
 </div>
 
@@ -135,5 +136,11 @@
     border-radius: 8px;
     font-size: 0.85rem;
     margin-bottom: 1rem;
+  }
+  .rate-hint {
+    margin: 1rem 0 0 0;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    line-height: 1.4;
   }
 </style>

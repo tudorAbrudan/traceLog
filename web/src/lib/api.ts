@@ -35,6 +35,51 @@ export const api = {
   logout: () => request('POST', '/auth/logout'),
   me: () => request('GET', '/auth/me'),
 
+  /** Re-enter hub login password; downloads a SQLite snapshot (VACUUM INTO) of TraceLog’s database. */
+  exportDatabase: async (password: string) => {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
+    const res = await fetch(`${apiBase()}/database/export`, {
+      method: 'POST',
+      headers,
+      credentials: 'same-origin',
+      body: JSON.stringify({ password }),
+    });
+    const ct = res.headers.get('Content-Type') || '';
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      if (ct.includes('application/json')) {
+        try {
+          const j = await res.json();
+          if (j.error) msg = j.error;
+        } catch {
+          /* ignore */
+        }
+      }
+      throw new Error(msg);
+    }
+    const blob = await res.blob();
+    const disp = res.headers.get('Content-Disposition') || '';
+    const m = /filename\*=UTF-8''([^;\n]+)|filename="([^"]+)"|filename=([^;\n]+)/i.exec(disp);
+    let name = 'tracelog-backup.db';
+    if (m) {
+      const raw = (m[1] || m[2] || m[3] || '').trim();
+      try {
+        name = decodeURIComponent(raw);
+      } catch {
+        name = raw;
+      }
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+
   // Servers
   listServers: () => request('GET', '/servers'),
   getServer: (id: string) => request('GET', `/servers/${id}`),

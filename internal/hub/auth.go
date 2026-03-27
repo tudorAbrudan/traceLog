@@ -21,15 +21,17 @@ type contextKey string
 
 const userContextKey contextKey = "user"
 
-// Rate limiter for login attempts
+// Rate limiter for login attempts: max failures per minute, then 15-minute lockout for that IP.
 type loginRateLimiter struct {
-	mu       sync.Mutex
-	attempts map[string][]time.Time
+	mu        sync.Mutex
+	attempts  map[string][]time.Time
+	lockUntil map[string]time.Time
 }
 
 func newLoginRateLimiter() *loginRateLimiter {
 	return &loginRateLimiter{
-		attempts: make(map[string][]time.Time),
+		attempts:  make(map[string][]time.Time),
+		lockUntil: make(map[string]time.Time),
 	}
 }
 
@@ -44,32 +46,58 @@ func (rl *loginRateLimiter) isBlocked(ip string) bool {
 	defer rl.mu.Unlock()
 
 	now := time.Now()
-	attempts := rl.attempts[ip]
+	if until, ok := rl.lockUntil[ip]; ok {
+		if now.Before(until) {
+			return true
+		}
+		delete(rl.lockUntil, ip)
+	}
 
-	// Clean old attempts
-	var recent []time.Time
+	attempts := rl.pruneAttemptsLocked(ip, now)
+	var recentMinute int
 	for _, t := range attempts {
+		if now.Sub(t) < loginWindowMinute {
+			recentMinute++
+		}
+	}
+	return recentMinute >= maxLoginAttempts
+}
+
+func (rl *loginRateLimiter) pruneAttemptsLocked(ip string, now time.Time) []time.Time {
+	var recent []time.Time
+	for _, t := range rl.attempts[ip] {
 		if now.Sub(t) < lockoutDuration {
 			recent = append(recent, t)
 		}
 	}
 	rl.attempts[ip] = recent
-
-	// Count attempts in the last minute
-	var recentMinute int
-	for _, t := range recent {
-		if now.Sub(t) < loginWindowMinute {
-			recentMinute++
-		}
-	}
-
-	return recentMinute >= maxLoginAttempts
+	return recent
 }
 
-func (rl *loginRateLimiter) record(ip string) {
+func (rl *loginRateLimiter) recordFailure(ip string) {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
-	rl.attempts[ip] = append(rl.attempts[ip], time.Now())
+
+	now := time.Now()
+	rl.attempts[ip] = append(rl.attempts[ip], now)
+	attempts := rl.pruneAttemptsLocked(ip, now)
+
+	var inMinute int
+	for _, t := range attempts {
+		if now.Sub(t) < loginWindowMinute {
+			inMinute++
+		}
+	}
+	if inMinute >= maxLoginAttempts {
+		rl.lockUntil[ip] = now.Add(lockoutDuration)
+	}
+}
+
+func (rl *loginRateLimiter) reset(ip string) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	delete(rl.attempts, ip)
+	delete(rl.lockUntil, ip)
 }
 
 func (h *Hub) cookiePath() string {
@@ -136,7 +164,7 @@ func (h *Hub) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	if h.rateLimiter.isBlocked(ip) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{
-			"error": fmt.Sprintf("Too many login attempts. Try again in %d minutes.", int(lockoutDuration.Minutes())),
+			"error": fmt.Sprintf("Too many failed login attempts. Wait up to %d minutes before trying again.", int(lockoutDuration.Minutes())),
 		})
 		return
 	}
@@ -152,18 +180,20 @@ func (h *Hub) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.store.GetUserByUsername(r.Context(), req.Username)
 	if err != nil {
-		h.rateLimiter.record(ip)
+		h.rateLimiter.recordFailure(ip)
 		slog.Warn("Login failed: user not found", "username", req.Username, "ip", ip)
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Invalid username or password"})
 		return
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
-		h.rateLimiter.record(ip)
+		h.rateLimiter.recordFailure(ip)
 		slog.Warn("Login failed: wrong password", "username", req.Username, "ip", ip)
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Invalid username or password"})
 		return
 	}
+
+	h.rateLimiter.reset(ip)
 
 	token, err := generateToken()
 	if err != nil {

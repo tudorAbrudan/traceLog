@@ -18,6 +18,10 @@
 
   let aboutVersion = '';
 
+  let exportPassword = '';
+  let exportBusy = false;
+  let exportErr = '';
+
   // Servers
   let servers: any[] = [];
 
@@ -42,10 +46,10 @@
   const gmailConfigTemplate = `{
   "host": "smtp.gmail.com",
   "port": 587,
-  "username": "adresa.ta@gmail.com",
+  "username": "you@gmail.com",
   "password": "xxxx xxxx xxxx xxxx",
-  "from": "adresa.ta@gmail.com",
-  "to": "unde.primesti@example.com",
+  "from": "you@gmail.com",
+  "to": "alerts@example.com",
   "use_tls": true
 }`;
 
@@ -126,7 +130,7 @@
   // Notification channels
   async function addChannel() {
     if (!newChName?.trim() || !newChConfig?.trim()) {
-      alert('Introdu un nume pentru canal și JSON-ul de configurare.');
+      alert('Enter a channel name and configuration JSON.');
       return;
     }
     try {
@@ -243,22 +247,22 @@
           <h3>Notification Channels</h3>
 
           <div class="notify-help">
-            <h4 class="notify-help-title">Gmail — exemplu și configurare</h4>
+            <h4 class="notify-help-title">Gmail (SMTP) — example &amp; setup</h4>
             <p class="hint notify-help-lead">
-              Google nu permite trimiterea SMTP cu parola contului dacă ai verificare în doi pași activă.
-              Folosește o <strong>parolă pentru aplicații</strong> (App Password) în câmpul <code>password</code>.
+              With <strong>2-Step Verification</strong> enabled, Google does not allow normal account passwords for SMTP. Use an
+              <strong>App Password</strong> in the <code>password</code> field.
             </p>
             <ol class="notify-steps">
-              <li>Deschide <a href="https://myaccount.google.com/security" target="_blank" rel="noopener noreferrer">Securitate cont Google</a> și asigură-te că <strong>Verificare în doi pași</strong> este activată.</li>
-              <li>Mergi la <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer">Parole pentru aplicații</a> (dacă nu apare, caută „App passwords” în setările contului).</li>
-              <li>Creează o parolă nouă (ex. aplicație: Mail, dispozitiv: Other → „TraceLog”), copiază cele 16 caractere și pune-le în JSON fără spații sau cu spațiile afișate de Google — ambele merg.</li>
-              <li><code>username</code> și <code>from</code> trebuie să fie adresa Gmail completă. <code>to</code> poate fi orice adresă la care vrei să primești alertele.</li>
-              <li>Păstrează <code>host</code>: <code>smtp.gmail.com</code>, <code>port</code>: <code>587</code>, <code>use_tls</code>: <code>true</code> (STARTTLS, ca în TraceLog).</li>
+              <li>Open <a href="https://myaccount.google.com/security" target="_blank" rel="noopener noreferrer">Google Account security</a> and ensure <strong>2-Step Verification</strong> is on.</li>
+              <li>Go to <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer">App passwords</a> (or search “App passwords” in account settings if the link is hidden).</li>
+              <li>Create a new app password (e.g. app: Mail, device: Other → “TraceLog”), copy the 16 characters into JSON — with or without spaces as Google shows them.</li>
+              <li><code>username</code> and <code>from</code> must be your full Gmail address. <code>to</code> is any address that should receive alerts.</li>
+              <li>Keep <code>host</code> <code>smtp.gmail.com</code>, <code>port</code> <code>587</code>, <code>use_tls</code> <code>true</code> (STARTTLS).</li>
             </ol>
-            <p class="hint">După ce salvezi canalul, folosește <strong>Test</strong> ca să verifici trimiterea.</p>
+            <p class="hint">After saving the channel, use <strong>Test</strong> to verify delivery.</p>
             <div class="notify-example-row">
               <pre class="notify-pre"><code>{gmailConfigTemplate.trim()}</code></pre>
-              <button type="button" class="btn-secondary notify-insert-btn" on:click={insertGmailTemplate}>Inserează exemplul în formular</button>
+              <button type="button" class="btn-secondary notify-insert-btn" on:click={insertGmailTemplate}>Insert example into form</button>
             </div>
           </div>
 
@@ -270,7 +274,7 @@
               <option value="webhook">Webhook</option>
             </select>
             <textarea bind:value={newChConfig} placeholder={newChType === 'email'
-              ? 'JSON: host, port, username, password, from, to, use_tls — vezi exemplul Gmail de mai sus'
+              ? 'JSON: host, port, username, password, from, to, use_tls — see Gmail example above'
               : '{"url":"https://hooks.slack.com/...","method":"POST"}'}
             ></textarea>
             <button class="btn-save" on:click={addChannel}>Add Channel</button>
@@ -366,6 +370,46 @@
           <h3>Account</h3>
           <p class="hint">Logged in as: <strong>{$user?.username}</strong></p>
           <p class="hint">To change password: <code>tracelog user reset-password {$user?.username}</code></p>
+
+          <h4 class="subhead">Database backup</h4>
+          <p class="hint">
+            Download a SQLite snapshot of this hub’s data (same idea as <code>VACUUM INTO</code> / CLI backup). Enter your TraceLog password to confirm.
+          </p>
+          {#if exportErr}
+            <p class="export-err">{exportErr}</p>
+          {/if}
+          <div class="export-row">
+            <input
+              type="password"
+              class="export-pass"
+              placeholder="Your TraceLog password"
+              bind:value={exportPassword}
+              autocomplete="current-password"
+            />
+            <button
+              type="button"
+              class="btn-secondary"
+              disabled={exportBusy}
+              on:click={async () => {
+                exportErr = '';
+                if (!exportPassword.trim()) {
+                  exportErr = 'Enter your password to download a backup.';
+                  return;
+                }
+                exportBusy = true;
+                try {
+                  await api.exportDatabase(exportPassword);
+                  exportPassword = '';
+                } catch (e: any) {
+                  exportErr = e.message || 'Download failed';
+                } finally {
+                  exportBusy = false;
+                }
+              }}
+            >
+              {exportBusy ? 'Preparing…' : 'Download backup'}
+            </button>
+          </div>
         </div>
 
       {:else if activeTab === 'about'}
@@ -394,6 +438,14 @@
   .settings-nav button.active { background: var(--bg-secondary); color: var(--text-primary); font-weight: 600; }
   .settings-content { flex: 1; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem; }
   .section h3 { font-size: 1rem; margin: 0 0 0.75rem 0; color: var(--text-primary); }
+  .subhead { font-size: 0.9rem; margin: 1.25rem 0 0.5rem 0; color: var(--text-primary); font-weight: 600; }
+  .export-row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-top: 0.5rem; }
+  .export-pass {
+    padding: 0.5rem 0.65rem; min-width: 220px; flex: 1; max-width: 320px;
+    background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text-primary); font-size: 0.85rem;
+  }
+  .export-err { color: #f85149; font-size: 0.85rem; margin: 0.5rem 0 0 0; }
   .field { margin-bottom: 1rem; }
   .field label { display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.3rem; }
   .field-hint { margin-top: -0.2rem; margin-bottom: 0.4rem !important; }

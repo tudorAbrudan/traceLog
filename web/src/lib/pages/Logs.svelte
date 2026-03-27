@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api } from '../api';
+  import DockerLogsPanel from '../components/DockerLogsPanel.svelte';
 
   let logs: any[] = [];
   let servers: any[] = [];
@@ -108,6 +109,8 @@
   }
 
   $: if (level || selectedServer) fetchLogs();
+
+  $: selectedServerHost = servers.find((s) => s.id === selectedServer)?.host ?? '';
 </script>
 
 <div class="logs-page">
@@ -155,6 +158,10 @@
       </button>
     </div>
   </div>
+
+  {#if selectedServerHost === 'localhost'}
+    <DockerLogsPanel serverId={selectedServer} />
+  {/if}
 
   <div class="log-viewer">
     {#if loading && logs.length === 0}

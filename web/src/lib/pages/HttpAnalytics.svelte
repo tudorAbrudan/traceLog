@@ -162,6 +162,13 @@
   {:else if !stats || stats.total_requests === 0}
     <div class="status-msg">No HTTP request data yet. Configure nginx access log monitoring in Settings to see data.</div>
   {:else}
+    <div class="page-intro">
+      <strong>IP rankings</strong> are on this page (sidebar: <strong>HTTP Analytics</strong>). Use the time range above.
+      <ul>
+        <li><strong>Top client IPs</strong> — clients ranked by <em>total</em> request count (table below, up to 50 rows). <strong>Unique IPs</strong> in the summary is how many distinct addresses appear in the range.</li>
+        <li><strong>Top IPs by error responses</strong> — clients ranked by how many <strong>4xx / 5xx</strong> responses they received (separate table). Use <strong>Lines</strong> to see sample failing requests for one IP.</li>
+      </ul>
+    </div>
     <div class="stats-grid">
       <div class="stat-card">
         <span class="stat-value">{stats.total_requests.toLocaleString()}</span>
@@ -218,7 +225,8 @@
 
     <div class="tables-row three">
       <div class="table-section">
-        <h3>Top paths</h3>
+        <h3>Top URL paths</h3>
+        <p class="section-lead">Most requested paths in this range.</p>
         <table>
           <thead><tr><th>Path</th><th class="num">Count</th></tr></thead>
           <tbody>
@@ -231,6 +239,7 @@
 
       <div class="table-section">
         <h3>Top method + path</h3>
+        <p class="section-lead">Combined HTTP method and path by volume.</p>
         <table>
           <thead><tr><th>Method</th><th>Path</th><th class="num">Count</th></tr></thead>
           <tbody>
@@ -246,9 +255,10 @@
       </div>
 
       <div class="table-section">
-        <h3>Top IPs</h3>
+        <h3>Top client IPs</h3>
+        <p class="section-lead">Ranking by total requests (success and error). Up to 50 rows.</p>
         <table>
-          <thead><tr><th>IP</th><th class="num">Count</th><th>Lookup</th></tr></thead>
+          <thead><tr><th>IP address</th><th class="num">Requests</th><th>Lookup</th></tr></thead>
           <tbody>
             {#each stats.top_ips || [] as row}
               <tr class:bl-row={isBlacklistedIP(row.ip)}>
@@ -270,9 +280,10 @@
     </div>
 
     <div class="bad-section">
-      <h3>Bad requests (4xx / 5xx)</h3>
+      <h3>Top IPs by error responses (4xx / 5xx)</h3>
       <p class="policy-hint">
-        Per-IP counts in the selected time range. Click a row to load recent bad request lines for that IP below.
+        Ranking by number of <strong>client or server error</strong> responses per IP in the selected range (up to 50 IPs).
+        Use <strong>Lines</strong> to load recent failing requests for that address. <strong>Show all bad requests</strong> lists samples from every IP.
       </p>
       <div class="bad-toolbar">
         {#if badFilterIP}
@@ -283,7 +294,7 @@
       </div>
       <div class="bad-tables">
         <table class="bad-by-ip">
-          <thead><tr><th>IP</th><th class="num">Bad count</th><th></th></tr></thead>
+          <thead><tr><th>IP address</th><th class="num">4xx/5xx count</th><th></th></tr></thead>
           <tbody>
             {#each stats.bad_requests_by_ip || [] as row}
               <tr class:bl-row={isBlacklistedIP(row.ip)}>
@@ -298,7 +309,7 @@
           </tbody>
         </table>
         <div class="bad-lines-wrap">
-          <h4>Recent bad request lines {#if badFilterIP}for {badFilterIP}{/if}</h4>
+          <h4>Sample error request lines {#if badFilterIP}for {badFilterIP}{/if}</h4>
           {#if badLoading}
             <div class="muted">Loading…</div>
           {:else if badLogs.length === 0}
@@ -373,6 +384,13 @@
 
 <style>
   .analytics { padding: 1.5rem; max-width: 1500px; }
+  .page-intro {
+    font-size: 0.82rem; color: var(--text-secondary); line-height: 1.5; margin-bottom: 1rem;
+    padding: 0.75rem 1rem; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 10px;
+  }
+  .page-intro ul { margin: 0.4rem 0 0 0; padding-left: 1.2rem; }
+  .page-intro li { margin-bottom: 0.25rem; }
+  .section-lead { font-size: 0.72rem; color: var(--text-muted); margin: -0.25rem 0 0.5rem 0; line-height: 1.35; }
   .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem; }
   h2 { margin: 0; font-size: 1.3rem; color: var(--text-primary); }
   h3 { font-size: 0.85rem; color: var(--text-secondary); margin: 0 0 0.5rem; }

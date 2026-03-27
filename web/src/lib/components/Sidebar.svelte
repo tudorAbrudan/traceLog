@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { currentPage, user, darkMode } from '../store';
+  import { currentPage, user, darkMode, suppressSingleServerAutoOpen } from '../store';
   import { api } from '../api';
 
   function toggleTheme() {
@@ -37,7 +37,10 @@
     {#each navItems as item}
       <button
         class:active={$currentPage === item.id}
-        on:click={() => currentPage.set(item.id)}
+        on:click={() => {
+          if (item.id === 'overview') suppressSingleServerAutoOpen.set(true);
+          currentPage.set(item.id);
+        }}
       >
         <span class="icon">{item.icon}</span>
         <span>{item.label}</span>

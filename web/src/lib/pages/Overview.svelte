@@ -1,7 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { get } from 'svelte/store';
   import { api } from '../api';
   import ServerCard from '../components/ServerCard.svelte';
+  import { currentPage, suppressSingleServerAutoOpen } from '../store';
 
   let servers: any[] = [];
   let loading = true;
@@ -18,7 +20,11 @@
 
   async function loadServers() {
     try {
-      servers = (await api.listServers()) || [];
+      const list = (await api.listServers()) || [];
+      servers = list;
+      if (list.length === 1 && !get(suppressSingleServerAutoOpen)) {
+        currentPage.set('server:' + list[0].id);
+      }
     } catch {} finally { loading = false; }
   }
 
