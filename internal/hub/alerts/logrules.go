@@ -1,5 +1,20 @@
 package alerts
 
+// AlertNotificationKind returns a short label and a plain-language hint for email/webhook bodies.
+func AlertNotificationKind(metric string) (kindTitle, contextHint string) {
+	switch {
+	case IsLogMetricRule(metric):
+		return "Ingested log line (Log Sources)",
+			"This comes from a line TraceLog stored from a configured Log Source on the agent host (file path or similar). It is not an Uptime monitor URL check. Docker “Load logs” in the UI does not trigger this unless those lines are ingested via a file/source."
+	case IsDockerResourceMetric(metric):
+		return "Docker container metric (docker stats)",
+			"Evaluated from docker stats on the agent. When a container name appears below, it is the container that exceeded the threshold."
+	default:
+		return "Host system metric",
+			"Evaluated from CPU, memory, disk, or load averages reported by the agent for this server."
+	}
+}
+
 // IsDockerResourceMetric is true for rules evaluated on per-container docker stats (not host system metrics).
 func IsDockerResourceMetric(metric string) bool {
 	switch metric {

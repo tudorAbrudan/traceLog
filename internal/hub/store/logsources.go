@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/tudorAbrudan/tracelog/internal/models"
 )
@@ -21,6 +22,24 @@ type LogSourceRecord struct {
 	Enabled          bool     `json:"enabled"`
 	IngestLevels     string   `json:"-"`                 // JSON array in DB; empty = ingest all severities
 	IngestLevelsList []string `json:"ingest_levels,omitempty"`
+}
+
+// LookupLogSourceByName returns the configured path/container/type for an enabled Log Source
+// whose name matches the ingested line's source field for this server_id.
+func (s *Store) LookupLogSourceByName(ctx context.Context, serverID, sourceName string) (path, container, sourceType string, ok bool) {
+	sourceName = strings.TrimSpace(sourceName)
+	if sourceName == "" || serverID == "" {
+		return "", "", "", false
+	}
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COALESCE(path,''), COALESCE(container,''), COALESCE(type,'') FROM log_sources
+		 WHERE enabled = 1 AND name = ? AND server_id = ?`,
+		sourceName, serverID,
+	).Scan(&path, &container, &sourceType)
+	if err != nil {
+		return "", "", "", false
+	}
+	return path, container, sourceType, true
 }
 
 func (s *Store) ListLogSources(ctx context.Context) ([]LogSourceRecord, error) {

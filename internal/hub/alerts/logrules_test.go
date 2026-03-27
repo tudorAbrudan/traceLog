@@ -22,3 +22,18 @@ func TestLogLevelMatches(t *testing.T) {
 		t.Fatal("log_critical should not match error alone")
 	}
 }
+
+func TestAlertNotificationKind(t *testing.T) {
+	k, h := AlertNotificationKind("log_warn")
+	if k == "" || h == "" {
+		t.Fatalf("expected non-empty kind and hint for log_warn, got %q / %q", k, h)
+	}
+	k, h = AlertNotificationKind("docker_mem_pct")
+	if k == "" || h == "" {
+		t.Fatalf("expected non-empty for docker, got %q / %q", k, h)
+	}
+	k, h = AlertNotificationKind("cpu_percent")
+	if k == "" || h == "" {
+		t.Fatalf("expected non-empty for host metric, got %q / %q", k, h)
+	}
+}

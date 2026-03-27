@@ -16,6 +16,10 @@
   let badLogs: any[] = [];
   let badLoading = false;
   let badFilterIP = '';
+  /** Ingested access log rows with duration >= threshold (ms). */
+  let slowLogs: any[] = [];
+  let slowLoading = false;
+  let slowMinMs = 500;
 
   const ranges = [
     { value: '1h', label: '1H' },
@@ -78,6 +82,7 @@
         blacklistText = ips.join('\n');
       }
       await refreshBadRequests();
+      await refreshSlowRequests();
     } catch (e) {
       console.error(e);
     }
@@ -113,6 +118,23 @@
       badLogs = [];
     } finally {
       badLoading = false;
+    }
+  }
+
+  async function refreshSlowRequests() {
+    if (!selectedServer) return;
+    slowLoading = true;
+    try {
+      const min = Math.max(1, Math.min(3_600_000, Number(slowMinMs) || 500));
+      slowLogs = await api.getAccessSlowRequests(selectedServer, {
+        range: range_,
+        min_ms: min,
+        limit: 200,
+      });
+    } catch {
+      slowLogs = [];
+    } finally {
+      slowLoading = false;
     }
   }
 
@@ -228,6 +250,9 @@
         <li><strong>Top IPs by error responses</strong> — clients ranked by how many <strong>4xx / 5xx</strong> responses they received (separate table). Use <strong>Lines</strong> to see sample failing requests for one IP.</li>
         <li>
           <strong>Self-traffic</strong> — rankings can ignore chosen <strong>User-Agent</strong> substrings (e.g. TraceLog’s uptime client) under <strong>Settings → General</strong>, so tables reflect your app’s visitors rather than monitoring probes.
+        </li>
+        <li>
+          <strong>Slow requests</strong> — lists ingested access lines whose <strong>request time</strong> (ms from the log) is at least your threshold; sorted slowest first. Requires your access log format to include duration (nginx/apache combined format).
         </li>
       </ul>
     </div>
@@ -364,6 +389,66 @@
           </tbody>
         </table>
       </div>
+    </div>
+
+    <div class="slow-section">
+      <h3>Slow requests</h3>
+      <p class="policy-hint">
+        Rows where <strong>duration</strong> from the access log is at least the threshold (same time range as above). Sorted by <strong>slowest first</strong>. Uses the same User-Agent exclusions as top tables when configured under <strong>Settings → General</strong>.
+      </p>
+      <div class="slow-toolbar">
+        <label class="slow-min-label"
+          >Min duration (ms)
+          <input
+            type="number"
+            class="slow-min-input"
+            bind:value={slowMinMs}
+            min="1"
+            max="3600000"
+            step="1"
+          /></label
+        >
+        <button type="button" class="btn-secondary" on:click={refreshSlowRequests} disabled={slowLoading}>
+          {slowLoading ? 'Loading…' : 'Refresh'}
+        </button>
+      </div>
+      {#if slowLoading && slowLogs.length === 0}
+        <div class="muted">Loading…</div>
+      {:else if slowLogs.length === 0}
+        <div class="muted">No requests at or above this threshold in the range (or duration not present in logs).</div>
+      {:else}
+        <div class="recent-table slow-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th class="num">Ms</th>
+                <th>Time</th>
+                <th>Method</th>
+                <th>Path</th>
+                <th class="num">Status</th>
+                <th>IP</th>
+                <th>User-Agent</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each slowLogs as log}
+                <tr>
+                  <td class="num slow-ms">{Math.round(Number(log.duration_ms) || 0)}</td>
+                  <td class="mono">{new Date(log.ts).toLocaleString()}</td>
+                  <td><span class="method">{log.method}</span></td>
+                  <td class="path">{log.path}</td>
+                  <td class="num {statusClass(log.status_code)}">{log.status_code}</td>
+                  <td class="mono">
+                    {log.ip}
+                    <a href={whoisHref(log.ip)} target="_blank" rel="noopener noreferrer" class="mini-whois">↗</a>
+                  </td>
+                  <td class="ua-cell" title={log.user_agent || ''}>{log.user_agent || '—'}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {/if}
     </div>
 
     <div class="bad-section">
@@ -605,6 +690,47 @@
     padding: 1px 4px; border-radius: 3px; background: #f8514933; color: #f85149; margin-right: 4px;
   }
   .ip-cell { vertical-align: middle; }
+
+  .slow-section {
+    margin-bottom: 1.25rem;
+    padding: 0.85rem 1rem 1rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  .slow-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 0.65rem;
+    margin-bottom: 0.65rem;
+  }
+  .slow-min-label {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+  .slow-min-input {
+    width: 7rem;
+    padding: 0.35rem 0.45rem;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 0.85rem;
+  }
+  .slow-ms { font-weight: 600; color: var(--accent); }
+  .slow-table-wrap { overflow-x: auto; }
+  .ua-cell {
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+  }
 
   .bad-section {
     background: var(--bg-secondary); border: 1px solid var(--border);

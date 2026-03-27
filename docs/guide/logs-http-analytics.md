@@ -24,6 +24,7 @@ This page explains how TraceLog handles **application/text logs**, **ingested co
 - **Top paths / top IPs / unique IPs:** Computed for the selected time range.
 - **Top method + path:** Groups `METHOD` + `PATH` for quick insight into hot endpoints.
 - **Bad requests:** Counts of **4xx/5xx** per IP; **Lines** shows recent matching rows. Status **≥ 400** defines “bad” here.
+- **Slow requests:** Table of ingested access lines where **duration** (from the log, in ms) is at least your threshold; sorted **slowest first**. Respects the same **User-Agent** exclusions as aggregate tables (Settings → General). Needs a log format that records request time (typical nginx/apache combined logs).
 - **IP list (HTTP Analytics panel):** One IP or **CIDR** per line (`#` comments ignored for export). After **Save**, TraceLog **highlights** matching traffic and estimates volume (“Req. from IP list”). This is **analytics only** — it does **not** block clients. To **block**, use **nginx** `deny`, **firewall**, or **CDN**/WAF. The UI offers **Copy nginx deny snippet** / **Download .conf** from the same textarea (you paste into nginx and run `nginx -t` + reload; TraceLog does not change nginx). The feature lives on this page so you can tune the list while viewing **top IPs**; enforcement remains outside TraceLog.
 - **WHOIS links:** Open external sites (e.g. ipwho.is, ipinfo.io); TraceLog does not run WHOIS on the server.
 
@@ -36,6 +37,7 @@ This page explains how TraceLog handles **application/text logs**, **ingested co
 | POST | `/api/logs/purge` | Purge ingested logs (CSRF). Body: `server_id`, `mode` `all` \| `older_than`, optional `range`, `source`. |
 | GET | `/api/servers/{id}/access-stats?range=&top_n=` | HTTP analytics aggregates. |
 | GET | `/api/servers/{id}/access-bad-requests?range=&ip=&limit=` | Recent 4xx/5xx lines. |
+| GET | `/api/servers/{id}/access-slow-requests?range=&min_ms=&limit=` | Rows with `duration_ms` ≥ `min_ms` (default 500), slowest first. |
 | GET | `/api/access-ip-policy` | JSON `{ "ips": ["1.2.3.4", "10.0.0.0/8"] }`. |
 | PUT | `/api/access-ip-policy` | Save blacklist (CSRF). Body: `{ "ips": [...] }`. |
 

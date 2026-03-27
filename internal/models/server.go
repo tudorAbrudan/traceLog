@@ -6,6 +6,7 @@ type Server struct {
 	ID         string    `json:"id"`
 	Name       string    `json:"name"`
 	Host       string    `json:"host,omitempty"`
+	Notes      string    `json:"notes,omitempty"`
 	APIKey     string    `json:"api_key,omitempty"`
 	Status     string    `json:"status"`
 	LastSeenAt time.Time `json:"last_seen_at,omitempty"`

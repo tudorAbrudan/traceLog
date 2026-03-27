@@ -4,6 +4,18 @@ All notable changes to TraceLog are documented here. The format is loosely based
 
 ## [Unreleased]
 
+## [v0.2.13] - 2026-03-27
+
+### Added
+
+- **HTTP Analytics — slow requests:** table with configurable **minimum duration (ms)**; **`GET /api/servers/{id}/access-slow-requests`** (`range`, `min_ms`, `limit`). Uses the same User-Agent exclusions and hub UI path filter as aggregate stats; sorted slowest first.
+- **Settings → Servers:** edit **name**, **registered host**, and **note** (free text included in **alert emails**); **`PUT /api/servers/{id}`**; migration **`servers.notes`**.
+- **Alert notification bodies:** **Alert type** + short **What this is**; optional **Server note**; **Configured path on agent** / **Docker log source target** when the log source name matches Log Sources; **UI tip**; **Docker container (metric)** label for docker stats rules.
+
+### Documentation
+
+- **README**, **configuration**, **logs-http-analytics** updated for the above.
+
 ## [v0.2.12] - 2026-03-27
 
 ### Fixed

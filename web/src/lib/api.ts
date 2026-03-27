@@ -88,6 +88,8 @@ export const api = {
   getDockerLogs: (id: string, container: string, tail = 500) =>
     request('GET', `/servers/${id}/docker/logs?container=${encodeURIComponent(container)}&tail=${tail}`),
   createServer: (name: string, host: string) => request('POST', '/servers', { name, host }),
+  updateServer: (id: string, body: { name: string; host?: string; notes?: string }) =>
+    request('PUT', `/servers/${id}`, body),
   deleteServer: (id: string) => request('DELETE', `/servers/${id}`),
 
   // Logs
@@ -169,6 +171,17 @@ export const api = {
     if (opts.limit) q.set('limit', String(opts.limit));
     const suffix = q.toString() ? `?${q}` : '';
     return request('GET', `/servers/${id}/access-bad-requests${suffix}`);
+  },
+  getAccessSlowRequests: (
+    id: string,
+    opts: { range?: string; min_ms?: number; limit?: number } = {},
+  ) => {
+    const q = new URLSearchParams();
+    if (opts.range) q.set('range', opts.range);
+    if (opts.min_ms != null && opts.min_ms > 0) q.set('min_ms', String(opts.min_ms));
+    if (opts.limit != null && opts.limit > 0) q.set('limit', String(opts.limit));
+    const suffix = q.toString() ? `?${q}` : '';
+    return request('GET', `/servers/${id}/access-slow-requests${suffix}`);
   },
   getAccessIPPolicy: () => request('GET', '/access-ip-policy'),
   putAccessIPPolicy: (ips: string[]) => request('PUT', '/access-ip-policy', { ips }),

@@ -179,6 +179,47 @@ func TestServerCRUD(t *testing.T) {
 	}
 }
 
+func TestServerUpdateAndLogSourceLookup(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	srv, err := s.CreateServer(ctx, "a", "localhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdateServer(ctx, srv.ID, "renamed", "10.0.0.1", "prod note"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetServer(ctx, srv.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "renamed" || got.Host != "10.0.0.1" || got.Notes != "prod note" {
+		t.Fatalf("update mismatch: %+v", got)
+	}
+
+	err = s.CreateLogSource(ctx, &LogSourceRecord{
+		ServerID: srv.ID,
+		Name:     "auth",
+		Type:     "file",
+		Path:     "/var/log/auth.log",
+		Format:   "plain",
+		Enabled:  true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, container, typ, ok := s.LookupLogSourceByName(ctx, srv.ID, "auth")
+	if !ok || path != "/var/log/auth.log" || container != "" || typ != "file" {
+		t.Fatalf("lookup: ok=%v path=%q container=%q type=%q", ok, path, container, typ)
+	}
+	_, _, _, ok = s.LookupLogSourceByName(ctx, srv.ID, "missing")
+	if ok {
+		t.Fatal("expected miss")
+	}
+}
+
 func TestMetricsInsertAndQuery(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()
@@ -440,6 +481,51 @@ func TestListLogSourcesForAgentServer(t *testing.T) {
 	empty, err := s.ListLogSourcesForAgentServer(ctx, "")
 	if err != nil || len(empty) != 0 {
 		t.Fatalf("empty server id: %+v err %v", empty, err)
+	}
+}
+
+func TestQueryAccessSlowRequests(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	ctx := context.Background()
+	srv, err := s.CreateServer(ctx, "web", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := time.Now().UTC().Add(-time.Minute)
+	fast := &models.AccessLogEntry{
+		ServerID: srv.ID, Ts: ts, Method: "GET", Path: "/fast", StatusCode: 200,
+		DurationMs: 10, IP: "1.1.1.1", UserAgent: "Mozilla/5.0", BytesSent: 100,
+	}
+	if err := s.InsertAccessLog(ctx, fast); err != nil {
+		t.Fatal(err)
+	}
+	slow := &models.AccessLogEntry{
+		ServerID: srv.ID, Ts: ts, Method: "GET", Path: "/slow", StatusCode: 200,
+		DurationMs: 2000, IP: "1.1.1.2", UserAgent: "Mozilla/5.0", BytesSent: 200,
+	}
+	if err := s.InsertAccessLog(ctx, slow); err != nil {
+		t.Fatal(err)
+	}
+	border := &models.AccessLogEntry{
+		ServerID: srv.ID, Ts: ts, Method: "GET", Path: "/border", StatusCode: 200,
+		DurationMs: 500, IP: "1.1.1.3", UserAgent: "Mozilla/5.0", BytesSent: 150,
+	}
+	if err := s.InsertAccessLog(ctx, border); err != nil {
+		t.Fatal(err)
+	}
+	out, err := s.QueryAccessSlowRequests(ctx, srv.ID, ts.Add(-time.Hour), 500, 10, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("want 2 rows with duration >= 500ms, got %d", len(out))
+	}
+	if out[0].DurationMs < out[1].DurationMs {
+		t.Fatalf("want ORDER BY duration_ms DESC, got %.0f then %.0f", out[0].DurationMs, out[1].DurationMs)
+	}
+	if out[0].Path != "/slow" {
+		t.Fatalf("expected slowest /slow first, got %q", out[0].Path)
 	}
 }
 

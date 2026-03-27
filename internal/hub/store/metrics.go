@@ -97,7 +97,7 @@ func (s *Store) CreateServer(ctx context.Context, name, host string) (*models.Se
 
 func (s *Store) ListServers(ctx context.Context) ([]models.Server, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, COALESCE(host, ''), COALESCE(api_key, ''), status,
+		SELECT id, name, COALESCE(host, ''), COALESCE(notes, ''), COALESCE(api_key, ''), status,
 			COALESCE(last_seen_at, ''), created_at
 		FROM servers ORDER BY created_at DESC`)
 	if err != nil {
@@ -109,7 +109,7 @@ func (s *Store) ListServers(ctx context.Context) ([]models.Server, error) {
 	for rows.Next() {
 		var srv models.Server
 		var lastSeen, created string
-		if err := rows.Scan(&srv.ID, &srv.Name, &srv.Host, &srv.APIKey, &srv.Status, &lastSeen, &created); err != nil {
+		if err := rows.Scan(&srv.ID, &srv.Name, &srv.Host, &srv.Notes, &srv.APIKey, &srv.Status, &lastSeen, &created); err != nil {
 			return nil, err
 		}
 		srv.LastSeenAt, _ = time.Parse(time.RFC3339, lastSeen)
@@ -123,10 +123,10 @@ func (s *Store) GetServer(ctx context.Context, id string) (*models.Server, error
 	var srv models.Server
 	var lastSeen, created string
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, name, COALESCE(host, ''), COALESCE(api_key, ''), status,
+		SELECT id, name, COALESCE(host, ''), COALESCE(notes, ''), COALESCE(api_key, ''), status,
 			COALESCE(last_seen_at, ''), created_at
 		FROM servers WHERE id = ?`, id,
-	).Scan(&srv.ID, &srv.Name, &srv.Host, &srv.APIKey, &srv.Status, &lastSeen, &created)
+	).Scan(&srv.ID, &srv.Name, &srv.Host, &srv.Notes, &srv.APIKey, &srv.Status, &lastSeen, &created)
 	if err != nil {
 		return nil, fmt.Errorf("server %s not found: %w", id, err)
 	}
@@ -139,10 +139,10 @@ func (s *Store) GetServerByAPIKey(ctx context.Context, apiKey string) (*models.S
 	var srv models.Server
 	var lastSeen, created string
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, name, COALESCE(host, ''), api_key, status,
+		SELECT id, name, COALESCE(host, ''), COALESCE(notes, ''), api_key, status,
 			COALESCE(last_seen_at, ''), created_at
 		FROM servers WHERE api_key = ?`, apiKey,
-	).Scan(&srv.ID, &srv.Name, &srv.Host, &srv.APIKey, &srv.Status, &lastSeen, &created)
+	).Scan(&srv.ID, &srv.Name, &srv.Host, &srv.Notes, &srv.APIKey, &srv.Status, &lastSeen, &created)
 	if err != nil {
 		return nil, err
 	}
@@ -178,13 +178,29 @@ func (s *Store) UpdateServerStatus(ctx context.Context, id, status string) error
 	return err
 }
 
+// UpdateServer updates display name, registered host, and free-form notes (shown in alert emails).
+func (s *Store) UpdateServer(ctx context.Context, id, name, host, notes string) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE servers SET name = ?, host = ?, notes = ? WHERE id = ?`,
+		name, host, notes, id,
+	)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("server %s not found", id)
+	}
+	return nil
+}
+
 func (s *Store) EnsureLocalServer(ctx context.Context) (*models.Server, error) {
 	var srv models.Server
 	var lastSeen, created string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, name, COALESCE(host, ''), api_key, status, COALESCE(last_seen_at, ''), created_at
+		`SELECT id, name, COALESCE(host, ''), COALESCE(notes, ''), api_key, status, COALESCE(last_seen_at, ''), created_at
 		 FROM servers WHERE host = 'localhost' LIMIT 1`,
-	).Scan(&srv.ID, &srv.Name, &srv.Host, &srv.APIKey, &srv.Status, &lastSeen, &created)
+	).Scan(&srv.ID, &srv.Name, &srv.Host, &srv.Notes, &srv.APIKey, &srv.Status, &lastSeen, &created)
 	if err == nil {
 		srv.LastSeenAt, _ = time.Parse(time.RFC3339, lastSeen)
 		srv.CreatedAt, _ = time.Parse(time.RFC3339, created)

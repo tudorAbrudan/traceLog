@@ -227,10 +227,12 @@ All endpoints require authentication (session cookie) except `/api/health` and `
 | GET | `/api/servers/:id/metrics?range=1h` | Get metrics |
 | GET | `/api/servers/:id/docker?range=1h` | Get Docker metrics |
 | POST | `/api/servers` | Create server |
+| PUT | `/api/servers/:id` | Update server name, host, notes (CSRF) |
 | GET | `/api/logs?server_id=X` | Query ingested logs |
 | POST | `/api/logs/purge` | Purge ingested logs (CSRF) |
 | GET | `/api/servers/:id/access-stats` | HTTP analytics (`range`, `top_n`) |
 | GET | `/api/servers/:id/access-bad-requests` | Recent 4xx/5xx (`range`, `ip`, `limit`) |
+| GET | `/api/servers/:id/access-slow-requests` | Slowest requests (`range`, `min_ms`, `limit`; same UA/path filters as stats) |
 | GET | `/api/access-ip-policy` | IP blacklist JSON |
 | PUT | `/api/access-ip-policy` | Save blacklist (CSRF) |
 | GET | `/api/settings` | Get settings |

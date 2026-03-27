@@ -74,7 +74,7 @@ Access **Settings** from the sidebar. Short reference:
 | **General** | Retention (1–30 days), collection interval | Hourly cleanup of old metrics, **ingested logs**, access logs, uptime, alerts, etc.; how often agents send system metrics. |
 | **Log Sources** | Paths + format + **agent** (local hub vs remote server) | Tailed lines are **stored in SQLite** (see [Logs & HTTP analytics](./logs-http-analytics.md)). **Scan** runs on the **hub host** only. Remote agents pick up their assigned sources via **`/api/agent/log-sources`** (see [Multi-Server](./multi-server.md)). |
 | **Notifications** | Email (SMTP JSON), webhooks | Alert delivery channels; test with **Test** on a channel. |
-| **Servers** | Registered agents, API keys | Multi-server; deleting a server removes its metrics/logs rows for that `server_id`. |
+| **Servers** | Name, **registered host**, **note**, API keys | **Host** and **note** are free text for your operations (e.g. public hostname instead of `localhost` on every box). **Note** is included in **alert emails**. **Save** per row. Deleting a server removes its metrics/logs for that `server_id`. |
 | **Alerts** | Metric, threshold, duration, channel | Fires when conditions hold; uses notification channels. **Recent alert notifications** lists sent events (email/webhook). |
 | **Account** | — | Password changes via CLI: `tracelog user reset-password …`. |
 | **About** | — | Build **version** (from `/api/health` when released); link to docs. |
@@ -83,7 +83,7 @@ More detail: [Logs & HTTP analytics](./logs-http-analytics.md) (purge, blacklist
 
 ### Alert emails and webhooks
 
-Alert bodies include **server name**, **registered host** (if set in Settings → Servers), **server ID**, and when the alert comes from logs or Docker metrics also **log source** (file path or tag) and **Docker container** name. To append a **dashboard URL** line (for example behind a reverse proxy), set on the hub process:
+Alert bodies include an **alert type** line (ingested log vs host metric vs Docker metric) and a short **what this is** explanation, then **server name**, **registered host**, optional **server note** (Settings → Servers), **server ID**. For **ingested log** rules, the **Log Source** name is resolved to the **configured path on the agent** when it matches a row in Log Sources. **Docker container** appears for Docker metric alerts. A **UI tip** reminds you to open Logs / Overview for that server. To append a **dashboard URL** line (for example behind a reverse proxy), set on the hub process:
 
 `TRACELOG_PUBLIC_DASHBOARD_URL=https://your-host.example.com/tracelog`
 

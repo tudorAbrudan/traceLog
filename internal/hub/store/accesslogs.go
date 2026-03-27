@@ -324,6 +324,56 @@ func (s *Store) QueryAccessBadRequests(ctx context.Context, serverID string, sin
 	return result, rows.Err()
 }
 
+// QueryAccessSlowRequests returns rows with duration_ms >= minDurationMs, newest slowest first.
+// Uses the same User-Agent exclude patterns and hub UI path filter as HTTP analytics aggregates.
+//
+//nolint:gosec // G202: uaCond + pathCond from helpers only (fixed SQL + bound args).
+func (s *Store) QueryAccessSlowRequests(ctx context.Context, serverID string, since time.Time, minDurationMs float64, limit int, excludeUASubstrings []string, excludeHubPathPrefix string) ([]models.AccessLogEntry, error) {
+	if minDurationMs <= 0 {
+		minDurationMs = 500
+	}
+	if minDurationMs > 3_600_000 { // 1 hour — avoid absurd thresholds
+		minDurationMs = 3_600_000
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	sinceStr := since.UTC().Format(time.RFC3339)
+	uaCond, uaArgs := accessUAExcludeSQL(excludeUASubstrings)
+	pathCond, pathArgs := accessLogExcludeHubUIPrefixSQL(excludeHubPathPrefix)
+	args := []any{serverID, sinceStr}
+	args = append(args, uaArgs...)
+	args = append(args, pathArgs...)
+	args = append(args, minDurationMs, limit)
+
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT server_id, ts, method, path, status_code, duration_ms, ip, user_agent, bytes_sent
+		 FROM access_logs WHERE server_id = ? AND ts >= ?`+uaCond+pathCond+` AND duration_ms >= ?
+		 ORDER BY duration_ms DESC, ts DESC LIMIT ?`,
+		args...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []models.AccessLogEntry
+	for rows.Next() {
+		var e models.AccessLogEntry
+		var ts string
+		if err := rows.Scan(&e.ServerID, &ts, &e.Method, &e.Path, &e.StatusCode,
+			&e.DurationMs, &e.IP, &e.UserAgent, &e.BytesSent); err != nil {
+			continue
+		}
+		e.Ts, _ = time.Parse(time.RFC3339, ts)
+		result = append(result, e)
+	}
+	return result, rows.Err()
+}
+
 //nolint:gosec // G202: pathCond from accessLogExcludeHubUIPrefixSQL only (fixed SQL + ?-bound prefix args).
 func (s *Store) GetRecentAccessLogs(ctx context.Context, serverID string, limit int, excludeHubPathPrefix string) ([]models.AccessLogEntry, error) {
 	pathCond, pathArgs := accessLogExcludeHubUIPrefixSQL(excludeHubPathPrefix)

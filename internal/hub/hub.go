@@ -90,11 +90,21 @@ func formatAlertNotificationBody(st *store.Store, ctx context.Context, alert *al
 	var b strings.Builder
 	b.WriteString(alert.Message)
 	b.WriteString("\n\n---\n")
+
+	kind, hint := alerts.AlertNotificationKind(alert.Metric)
+	fmt.Fprintf(&b, "Alert type: %s\n", kind)
+	if hint != "" {
+		fmt.Fprintf(&b, "What this is: %s\n", hint)
+	}
+
 	if sid != "" {
 		if srv, err := st.GetServer(ctx, sid); err == nil {
 			fmt.Fprintf(&b, "Server: %s\n", srv.Name)
 			if host := strings.TrimSpace(srv.Host); host != "" {
 				fmt.Fprintf(&b, "Registered host: %s\n", host)
+			}
+			if n := strings.TrimSpace(srv.Notes); n != "" {
+				fmt.Fprintf(&b, "Server note: %s\n", n)
 			}
 			fmt.Fprintf(&b, "Server ID: %s\n", srv.ID)
 		} else {
@@ -104,11 +114,25 @@ func formatAlertNotificationBody(st *store.Store, ctx context.Context, alert *al
 		b.WriteString("(No server context.)\n")
 	}
 	if alert.LogSource != "" {
-		fmt.Fprintf(&b, "Log source (file / tag): %s\n", alert.LogSource)
+		fmt.Fprintf(&b, "Log source (name): %s\n", alert.LogSource)
+		if sid != "" {
+			if path, container, srcType, ok := st.LookupLogSourceByName(ctx, sid, alert.LogSource); ok {
+				if strings.TrimSpace(path) != "" {
+					fmt.Fprintf(&b, "Configured path (on agent): %s\n", path)
+				}
+				if strings.TrimSpace(container) != "" {
+					fmt.Fprintf(&b, "Docker log source target: %s\n", container)
+				}
+				if strings.TrimSpace(srcType) != "" {
+					fmt.Fprintf(&b, "Source type: %s\n", srcType)
+				}
+			}
+		}
 	}
 	if alert.DockerContainer != "" {
-		fmt.Fprintf(&b, "Docker container: %s\n", alert.DockerContainer)
+		fmt.Fprintf(&b, "Docker container (metric): %s\n", alert.DockerContainer)
 	}
+	fmt.Fprintf(&b, "UI tip: open Logs (or Overview → server) and select this server to match this alert.\n")
 	if u := strings.TrimSpace(os.Getenv("TRACELOG_PUBLIC_DASHBOARD_URL")); u != "" {
 		fmt.Fprintf(&b, "Dashboard URL: %s\n", u)
 	}
@@ -314,6 +338,7 @@ func (h *Hub) registerRoutes() {
 	h.mux.HandleFunc("GET /api/servers/{id}/docker/logs", auth(h.handleDockerContainerLogs))
 	h.mux.HandleFunc("GET /api/servers/{id}/processes", auth(h.handleGetProcesses))
 	h.mux.HandleFunc("POST /api/servers", auth(csrf(h.handleCreateServer)))
+	h.mux.HandleFunc("PUT /api/servers/{id}", auth(csrf(h.handleUpdateServer)))
 	h.mux.HandleFunc("DELETE /api/servers/{id}", auth(csrf(h.handleDeleteServer)))
 
 	// Settings
@@ -334,6 +359,7 @@ func (h *Hub) registerRoutes() {
 	h.mux.HandleFunc("GET /api/servers/{id}/access-stats", auth(h.handleAccessLogStats))
 	h.mux.HandleFunc("GET /api/servers/{id}/access-logs", auth(h.handleRecentAccessLogs))
 	h.mux.HandleFunc("GET /api/servers/{id}/access-bad-requests", auth(h.handleAccessBadRequests))
+	h.mux.HandleFunc("GET /api/servers/{id}/access-slow-requests", auth(h.handleAccessSlowRequests))
 	h.mux.HandleFunc("GET /api/access-ip-policy", auth(h.handleAccessIPPolicy))
 	h.mux.HandleFunc("PUT /api/access-ip-policy", auth(csrf(h.handleAccessIPPolicy)))
 

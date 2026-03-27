@@ -73,6 +73,7 @@ func (s *Store) migrate() error {
 		migration003,
 		migration004,
 		migration005,
+		migration006,
 	}
 
 	for i := currentVersion; i < len(migrations); i++ {
@@ -274,6 +275,10 @@ WHERE NOT EXISTS (SELECT 1 FROM settings WHERE key = 'access_stats_exclude_ua_su
 
 const migration005 = `
 ALTER TABLE alert_rules ADD COLUMN docker_container TEXT NOT NULL DEFAULT '';
+`
+
+const migration006 = `
+ALTER TABLE servers ADD COLUMN notes TEXT NOT NULL DEFAULT '';
 `
 
 func (s *Store) Backup(ctx context.Context, destPath string) error {

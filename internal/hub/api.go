@@ -134,6 +134,48 @@ func (h *Hub) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, server)
 }
 
+func (h *Hub) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "missing server id")
+		return
+	}
+	var body struct {
+		Name  string `json:"name"`
+		Host  string `json:"host"`
+		Notes string `json:"notes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	name := strings.TrimSpace(body.Name)
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	host := strings.TrimSpace(body.Host)
+	notes := strings.TrimSpace(body.Notes)
+	if len(notes) > 2000 {
+		writeError(w, http.StatusBadRequest, "notes too long (max 2000 characters)")
+		return
+	}
+	if _, err := h.store.GetServer(r.Context(), id); err != nil {
+		writeError(w, http.StatusNotFound, "Server not found")
+		return
+	}
+	if err := h.store.UpdateServer(r.Context(), id, name, host, notes); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to update server: %v", err)
+		return
+	}
+	srv, err := h.store.GetServer(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to load server")
+		return
+	}
+	writeJSON(w, http.StatusOK, srv)
+}
+
 func (h *Hub) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 	if err := h.store.DeleteServer(r.Context(), r.PathValue("id")); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to delete server")
@@ -476,6 +518,39 @@ func (h *Hub) handleAccessBadRequests(w http.ResponseWriter, r *http.Request) {
 	logs, err := h.store.QueryAccessBadRequests(r.Context(), id, time.Now().Add(-d), ip, limit, h.accessStatsExcludeHubPathPrefix())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to query bad requests")
+		return
+	}
+	writeJSON(w, http.StatusOK, logs)
+}
+
+func (h *Hub) handleAccessSlowRequests(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	rangeStr := r.URL.Query().Get("range")
+	if rangeStr == "" {
+		rangeStr = "24h"
+	}
+	d, err := parseRange(rangeStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid range")
+		return
+	}
+	minMs := 500.0
+	if s := r.URL.Query().Get("min_ms"); s != "" {
+		if v, err := strconv.ParseFloat(s, 64); err == nil && v > 0 {
+			minMs = v
+		}
+	}
+	limit := 150
+	if s := r.URL.Query().Get("limit"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil {
+			limit = n
+		}
+	}
+	uaExclude := h.accessStatsExcludeUAPatterns(r.Context())
+	hubPathEx := h.accessStatsExcludeHubPathPrefix()
+	logs, err := h.store.QueryAccessSlowRequests(r.Context(), id, time.Now().Add(-d), minMs, limit, uaExclude, hubPathEx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to query slow requests")
 		return
 	}
 	writeJSON(w, http.StatusOK, logs)
