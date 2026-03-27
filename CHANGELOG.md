@@ -4,6 +4,24 @@ All notable changes to TraceLog are documented here. The format is loosely based
 
 ## [Unreleased]
 
+## [v0.2.3] - 2026-03-26
+
+### Added
+
+- **Hub database backup (UI + API):** `POST /api/database/export` (authenticated + CSRF); confirm with your TraceLog password, then download a SQLite snapshot (`VACUUM INTO`). **Settings → Account → Database backup.**
+
+### Fixed
+
+- **Login rate limiting:** after five failed attempts within one minute from an IP, enforce a fifteen-minute lockout; reset the limiter on successful login; align 429 messaging; small note on the login screen.
+
+### Changed
+
+- **Overview:** if there is only one server, open its detail automatically; use **Overview** in the sidebar or **Back** from the server page to see the grid again.
+- **Docker container logs** moved from the server detail page to **Logs** (for the selected server when it is the local hub host).
+- **HTTP Analytics:** clearer copy for IP rankings and table headings.
+
+## [v0.2.2] - 2026-03-26
+
 ### Fixed
 
 - **Release / GoReleaser:** stop committing `internal/hub/dist/` (Vite output changes every build and made the GitHub Actions tree dirty). CI runs `make web-build` before `go test` and lint.
