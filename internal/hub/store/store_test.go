@@ -400,3 +400,62 @@ func TestDeleteIngestedLogs(t *testing.T) {
 		t.Fatalf("expected 1 deleted (all), got %d", n2)
 	}
 }
+
+func TestListLogSourcesForAgentServer(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	srv, err := s.CreateServer(ctx, "agent-host", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := s.CreateServer(ctx, "other", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f := filepath.Join(t.TempDir(), "app.log")
+	if err := os.WriteFile(f, []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	lsA := &LogSourceRecord{ServerID: srv.ID, Name: "a", Type: "file", Path: f, Format: "plain", Enabled: true}
+	lsB := &LogSourceRecord{ServerID: other.ID, Name: "b", Type: "file", Path: f, Format: "plain", Enabled: true}
+	if err := s.CreateLogSource(ctx, lsA); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateLogSource(ctx, lsB); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := s.ListLogSourcesForAgentServer(ctx, srv.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 1 || out[0].Name != "a" {
+		t.Fatalf("want one source 'a', got %+v", out)
+	}
+
+	empty, err := s.ListLogSourcesForAgentServer(ctx, "")
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("empty server id: %+v err %v", empty, err)
+	}
+}
+
+func TestAlertHistoryInsertAndList(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if err := s.InsertAlertHistory(ctx, "rule1", "srv1", "fired", "hello"); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := s.ListAlertHistoryRecent(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].RuleID != "rule1" || rows[0].ServerID != "srv1" || rows[0].Message != "hello" {
+		t.Fatalf("unexpected row: %+v", rows[0])
+	}
+}

@@ -136,6 +136,8 @@ export const api = {
   createAlertRule: (data: any) => request('POST', '/alerts', data),
   deleteAlertRule: (id: string) => request('DELETE', `/alerts/${id}`),
 
+  listAlertHistory: (limit = 100) => request('GET', `/alert-history?limit=${limit}`),
+
   listLogAlertSilences: () => request('GET', '/log-alert-silences'),
   createLogAlertSilence: (data: { pattern: string; server_id?: string; rule_metric?: string }) =>
     request('POST', '/log-alert-silences', data),
@@ -144,6 +146,8 @@ export const api = {
   // Notifications
   listNotificationChannels: () => request('GET', '/notifications'),
   createNotificationChannel: (data: any) => request('POST', '/notifications', data),
+  updateNotificationChannel: (id: string, data: { name: string; type: string; config: string }) =>
+    request('PUT', `/notifications/${id}`, data),
   deleteNotificationChannel: (id: string) => request('DELETE', `/notifications/${id}`),
   testNotificationChannel: (id: string) => request('POST', `/notifications/${id}/test`),
 

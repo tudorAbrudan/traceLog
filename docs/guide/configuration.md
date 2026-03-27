@@ -52,7 +52,7 @@ scrape_configs:
     #   credentials: "your-secret-token"
 ```
 
-### Agent Mode
+### Agent Mode (remote)
 
 ```bash
 tracelog agent [flags]
@@ -60,8 +60,10 @@ tracelog agent [flags]
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--hub` | (required) | Hub base URL (e.g. `https://mon.example.com`) |
-| `--key` | (required) | Server API key |
+| `--hub` | (required) | WebSocket base URL: **`ws://` or `wss://`**, same host and path prefix as the dashboard (e.g. `wss://mon.example.com/tracelog`). The agent connects to `{hub}/api/ws/agent`. |
+| `--key` | (required) | API key from **Settings → Servers** for this monitored host. |
+
+**Log files:** For each **Log Source** in Settings whose **agent** is set to this server (not “This hub”), the agent calls **`GET …/api/agent/log-sources`** (HTTPS URL derived from `--hub`) about every **2 minutes**, then tails those **absolute paths on the agent machine**. Assign sources in **Settings → Log Sources**; no agent restart is needed when the list changes.
 
 ## Dashboard Settings
 
@@ -70,10 +72,10 @@ Access **Settings** from the sidebar. Short reference:
 | Tab | What you configure | Effect |
 |-----|--------------------|--------|
 | **General** | Retention (1–30 days), collection interval | Hourly cleanup of old metrics, **ingested logs**, access logs, uptime, alerts, etc.; how often agents send system metrics. |
-| **Log Sources** | Paths + format (plain / nginx / apache) | Agent tails files; lines are **stored in SQLite** (see [Logs & HTTP analytics](./logs-http-analytics.md)). Scan runs on the **hub host**. |
+| **Log Sources** | Paths + format + **agent** (local hub vs remote server) | Tailed lines are **stored in SQLite** (see [Logs & HTTP analytics](./logs-http-analytics.md)). **Scan** runs on the **hub host** only. Remote agents pick up their assigned sources via **`/api/agent/log-sources`** (see [Multi-Server](./multi-server.md)). |
 | **Notifications** | Email (SMTP JSON), webhooks | Alert delivery channels; test with **Test** on a channel. |
 | **Servers** | Registered agents, API keys | Multi-server; deleting a server removes its metrics/logs rows for that `server_id`. |
-| **Alerts** | Metric, threshold, duration, channel | Fires when conditions hold; uses notification channels. |
+| **Alerts** | Metric, threshold, duration, channel | Fires when conditions hold; uses notification channels. **Recent alert notifications** lists sent events (email/webhook). |
 | **Account** | — | Password changes via CLI: `tracelog user reset-password …`. |
 | **About** | — | Build **version** (from `/api/health` when released); link to docs. |
 

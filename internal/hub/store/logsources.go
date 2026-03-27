@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+
+	"github.com/tudorAbrudan/tracelog/internal/models"
 )
 
 type LogSourceRecord struct {
@@ -104,4 +106,43 @@ func (s *Store) UpdateLogSourceIngestLevels(ctx context.Context, id string, leve
 func (s *Store) DeleteLogSource(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM log_sources WHERE id = ?`, id)
 	return err
+}
+
+// ListLogSourcesForAgentServer returns enabled file log sources assigned to this server (remote agent tail).
+func (s *Store) ListLogSourcesForAgentServer(ctx context.Context, serverID string) ([]models.LogSource, error) {
+	if serverID == "" {
+		return nil, nil
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT name, type, COALESCE(path, ''), COALESCE(container, ''), COALESCE(format, ''), COALESCE(ingest_levels, '')
+		 FROM log_sources WHERE enabled = 1 AND type = 'file' AND TRIM(path) != '' AND server_id = ?`,
+		serverID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []models.LogSource
+	for rows.Next() {
+		var name, typ, path, container, format, ingestJSON string
+		if err := rows.Scan(&name, &typ, &path, &container, &format, &ingestJSON); err != nil {
+			return nil, err
+		}
+		ls := models.LogSource{
+			Name:      name,
+			Path:      path,
+			Type:      typ,
+			Container: container,
+			Format:    format,
+			Enabled:   true,
+		}
+		if ingestJSON != "" {
+			var levels []string
+			if err := json.Unmarshal([]byte(ingestJSON), &levels); err == nil {
+				ls.IngestLevels = levels
+			}
+		}
+		out = append(out, ls)
+	}
+	return out, rows.Err()
 }

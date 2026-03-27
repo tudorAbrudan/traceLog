@@ -13,10 +13,16 @@
   // Log sources
   let logSources: any[] = [];
   let newLogName = ''; let newLogPath = ''; let newLogFormat = 'plain';
+  /** Empty = local hub agent; set to a server id for remote `tracelog agent` tail (path must exist on that host). */
+  let newLogServerId = '';
 
   // Notifications
   let channels: any[] = [];
   let newChName = ''; let newChType = 'email'; let newChConfig = '';
+  let editingChannelId = '';
+  let editChName = '';
+  let editChType = 'email';
+  let editChConfig = '';
 
   let aboutVersion = '';
 
@@ -29,6 +35,7 @@
 
   // Alerts
   let alertRules: any[] = [];
+  let alertHistory: any[] = [];
   /** Substring silences for ingested log alert notifications (Settings → Alerts). */
   let logSilences: any[] = [];
   let newSilencePattern = '';
@@ -38,8 +45,16 @@
   let newAlertDuration = 300; let newAlertChannel = '';
   /** Cooldown for log-based alerts (seconds). */
   let newAlertLogCooldown = 1800;
+  /** Target server for Docker metric rules (agent that scrapes docker stats). */
+  let newAlertServerId = '';
+  /** Substring filter on container name; empty = all containers. */
+  let newDockerContainer = '';
 
   const metricAlerts = ['cpu_percent', 'mem_percent', 'disk_percent', 'load_1', 'load_5', 'load_15'];
+  const dockerAlertMetrics = [
+    { id: 'docker_mem_pct', label: 'Docker · memory % of container limit' },
+    { id: 'docker_cpu_percent', label: 'Docker · CPU % (host share, docker stats)' },
+  ];
   const logAlertMetrics = [
     { id: 'log_critical', label: 'Ingested log · critical only' },
     { id: 'log_error', label: 'Ingested log · error or critical' },
@@ -64,16 +79,21 @@
     return m === 'log_critical' || m === 'log_error' || m === 'log_warn';
   }
 
+  function isDockerAlertMetric(m: string): boolean {
+    return m === 'docker_mem_pct' || m === 'docker_cpu_percent';
+  }
 
-  /** JSON template for Gmail SMTP (matches hub EmailConfig: host, port, username, password, from, to, use_tls). */
+
+  /** JSON template for Gmail SMTP (hub EmailConfig: use_tls = implicit TLS/465; starttls = STARTTLS on 587). */
   const gmailConfigTemplate = `{
   "host": "smtp.gmail.com",
   "port": 587,
-  "username": "you@gmail.com",
-  "password": "xxxx xxxx xxxx xxxx",
-  "from": "you@gmail.com",
-  "to": "alerts@example.com",
-  "use_tls": true
+  "username": "myemail@gmail.com",
+  "password": "xxxxxxxxxxxxxxxx",
+  "from": "myemail@gmail.com",
+  "to": "supervisor@example.com",
+  "use_tls": false,
+  "starttls": true
 }`;
 
   function insertGmailTemplate() {
@@ -112,6 +132,9 @@
       if (tab === 'logs') {
         logSources = (await api.listLogSources()) || [];
         syncIngestPickFromSources();
+        if (servers.length === 0) {
+          servers = (await api.listServers()) || [];
+        }
       }
       if (tab === 'notifications') channels = (await api.listNotificationChannels()) || [];
       if (tab === 'servers') servers = (await api.listServers()) || [];
@@ -120,6 +143,10 @@
         channels = (await api.listNotificationChannels()) || [];
         logSilences = (await api.listLogAlertSilences()) || [];
         servers = (await api.listServers()) || [];
+        alertHistory = (await api.listAlertHistory(150)) || [];
+        if (!newAlertServerId && servers.length > 0) {
+          newAlertServerId = servers[0].id;
+        }
       }
     } catch {}
   }
@@ -173,7 +200,14 @@
       return;
     }
     try {
-      await api.createLogSource({ name, path, format: newLogFormat, type: 'file', server_id: '', enabled: true });
+      await api.createLogSource({
+        name,
+        path,
+        format: newLogFormat,
+        type: 'file',
+        server_id: newLogServerId.trim(),
+        enabled: true,
+      });
       newLogName = ''; newLogPath = '';
       logSources = (await api.listLogSources()) || [];
       syncIngestPickFromSources();
@@ -211,7 +245,38 @@
       channels = (await api.listNotificationChannels()) || [];
     } catch (e: any) { alert('Failed: ' + e.message); }
   }
+  function startEditChannel(ch: { id: string; name?: string; type?: string; config?: string }) {
+    editingChannelId = ch.id;
+    editChName = ch.name || '';
+    editChType = ch.type === 'webhook' ? 'webhook' : 'email';
+    editChConfig = ch.config || '';
+  }
+
+  function cancelEditChannel() {
+    editingChannelId = '';
+  }
+
+  async function saveEditedChannel() {
+    if (!editingChannelId) return;
+    if (!editChName?.trim() || !editChConfig?.trim()) {
+      alert('Enter a channel name and configuration JSON.');
+      return;
+    }
+    try {
+      await api.updateNotificationChannel(editingChannelId, {
+        name: editChName.trim(),
+        type: editChType,
+        config: editChConfig,
+      });
+      cancelEditChannel();
+      channels = (await api.listNotificationChannels()) || [];
+    } catch (e: any) {
+      alert('Failed: ' + e.message);
+    }
+  }
+
   async function removeChannel(id: string) {
+    if (editingChannelId === id) cancelEditChannel();
     await api.deleteNotificationChannel(id);
     channels = (await api.listNotificationChannels()) || [];
   }
@@ -233,6 +298,11 @@
   async function addAlert() {
     try {
       const log = isLogAlertMetric(newAlertMetric);
+      const dock = isDockerAlertMetric(newAlertMetric);
+      if (dock && !newAlertServerId?.trim()) {
+        alert('Choose a server for the Docker alert (the agent that runs docker stats).');
+        return;
+      }
       await api.createAlertRule({
         metric: newAlertMetric,
         operator: log ? '>' : newAlertOp,
@@ -240,7 +310,8 @@
         duration_seconds: log ? 0 : newAlertDuration,
         cooldown_seconds: log ? newAlertLogCooldown : 1800,
         channel_id: newAlertChannel,
-        server_id: '',
+        server_id: dock ? newAlertServerId.trim() : '',
+        docker_container: dock ? newDockerContainer.trim() : '',
         enabled: true,
       });
       alertRules = (await api.listAlertRules()) || [];
@@ -286,6 +357,12 @@
   function silenceRuleLabel(metric: string): string {
     if (!metric) return 'All log alert rules';
     return logAlertMetrics.find((x) => x.id === metric)?.label ?? metric;
+  }
+
+  function logSourceAgentLabel(sid: string): string {
+    if (!sid?.trim()) return 'This hub (local agent)';
+    const s = servers.find((x) => x.id === sid);
+    return s ? `Remote: ${s.name}` : sid.slice(0, 12);
   }
 </script>
 
@@ -342,23 +419,30 @@
         <div class="section">
           <h3>Log Sources</h3>
           <p class="hint">
-            In <strong>serve</strong> mode (hub + agent on the same machine), sources listed here are loaded from the database when TraceLog starts.
-            <strong>Restart the TraceLog service</strong> after you add, remove, or change a source (e.g. <code>sudo systemctl restart tracelog</code>).
-            The agent <strong>tails from the end of each file</strong> — only lines written <em>after</em> it starts appear under Logs; generate new HTTP traffic for nginx access logs to show up in HTTP Analytics.
+            <strong>Local hub (serve mode):</strong> sources with agent <em>This hub</em> are loaded when TraceLog starts on this machine.
+            <strong>Restart TraceLog</strong> after add/remove (e.g. <code>sudo systemctl restart tracelog</code>).
+            <strong>Remote agent:</strong> choose a monitored server — the file path must exist <em>on that host</em>; <code>tracelog agent</code> polls the hub about every <strong>2 minutes</strong> and starts tailing without a restart.
+            The agent <strong>tails from the end of each file</strong> — only new lines after tail starts appear in Logs.
           </p>
-          <p class="hint">Scan checks this server for usual paths (nginx, apache, syslog, etc.) and adds only files that exist. Format is set per file type (e.g. nginx for access logs).</p>
+          <p class="hint">Scan checks <strong>this</strong> machine for usual paths and adds local sources only.</p>
           <button class="btn-secondary" on:click={scanLogs}>Scan for common log files</button>
-          <div class="add-form">
+          <div class="add-form add-form-logs">
             <input type="text" bind:value={newLogName} placeholder="Name" />
             <input type="text" bind:value={newLogPath} placeholder="/var/log/..." />
-            <select bind:value={newLogFormat}>
+            <select bind:value={newLogFormat} class="log-format-select">
               <option value="plain">Plain</option>
               <option value="nginx">Nginx</option>
               <option value="apache">Apache</option>
             </select>
+            <select bind:value={newLogServerId} class="log-agent-select" title="Which agent tails this path">
+              <option value="">This hub (local agent)</option>
+              {#each servers as srv}
+                <option value={srv.id}>Remote: {srv.name}</option>
+              {/each}
+            </select>
             <button class="btn-save" on:click={addLogSource}>Add</button>
           </div>
-          <p class="hint">Manual add: the file must exist on the machine running TraceLog. Nginx and apache formats are checked against the first lines of the file (access-log style). Use plain for error logs, app output, or syslog-style lines.</p>
+          <p class="hint">For <strong>This hub</strong>, the file must exist here and nginx/apache formats are validated from file samples. For <strong>Remote</strong>, only name/path/format are checked on the hub — ensure the path is correct on the agent host.</p>
           <p class="hint">
             <strong>Store only chosen severities</strong> (per source): unchecked = ingest nothing for that level. If <em>none</em> are checked, <strong>all</strong> levels are stored. After changing filters, <strong>restart TraceLog</strong> so the agent reloads config. The hub also drops non-matching lines as a safeguard.
           </p>
@@ -370,7 +454,7 @@
                 <div class="item-row ingest-row">
                   <div class="ingest-main">
                     <strong>{ls.name}</strong>
-                    <span class="item-detail">{ls.path || ls.container} ({ls.format})</span>
+                    <span class="item-detail">{logSourceAgentLabel(ls.server_id)} · {ls.path || ls.container} ({ls.format})</span>
                     <div class="ingest-levels">
                       {#each ingestLevelOpts as lv}
                         <label class="ingest-cb"
@@ -404,7 +488,7 @@
               <li>Go to <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer">App passwords</a> (or search “App passwords” in account settings if the link is hidden).</li>
               <li>Create a new app password (e.g. app: Mail, device: Other → “TraceLog”), copy the 16 characters into JSON — with or without spaces as Google shows them.</li>
               <li><code>username</code> and <code>from</code> must be your full Gmail address. <code>to</code> is any address that should receive alerts.</li>
-              <li>Keep <code>host</code> <code>smtp.gmail.com</code>, <code>port</code> <code>587</code>, <code>use_tls</code> <code>true</code> (STARTTLS).</li>
+              <li>Port <code>587</code>: set <code>starttls</code> to <code>true</code> and <code>use_tls</code> to <code>false</code> (plain connect, then STARTTLS). Port <code>465</code> uses implicit TLS — set <code>use_tls</code> to <code>true</code> instead.</li>
             </ol>
             <p class="hint">After saving the channel, use <strong>Test</strong> to verify delivery.</p>
             <div class="notify-example-row">
@@ -421,7 +505,7 @@
               <option value="webhook">Webhook</option>
             </select>
             <textarea bind:value={newChConfig} placeholder={newChType === 'email'
-              ? 'JSON: host, port, username, password, from, to, use_tls — see Gmail example above'
+              ? 'JSON: host, port, username, password, from, to, use_tls, starttls — see Gmail example above'
               : '{"url":"https://hooks.slack.com/...","method":"POST"}'}
             ></textarea>
             <button class="btn-save" on:click={addChannel}>Add Channel</button>
@@ -431,15 +515,37 @@
           {:else}
             <div class="item-list">
               {#each channels as ch (ch.id)}
-                <div class="item-row">
-                  <div>
-                    <strong>{ch.name}</strong>
-                    <span class="item-detail">{ch.type}</span>
-                  </div>
-                  <div class="item-actions">
-                    <button class="btn-secondary" on:click={() => testChannel(ch.id)}>Test</button>
-                    <button class="btn-delete" on:click={() => removeChannel(ch.id)}>Delete</button>
-                  </div>
+                <div class="item-row" class:channel-edit-row={editingChannelId === ch.id}>
+                  {#if editingChannelId === ch.id}
+                    <div class="channel-edit-fields">
+                      <input type="text" bind:value={editChName} placeholder="Channel name" />
+                      <select bind:value={editChType}>
+                        <option value="email">Email (SMTP)</option>
+                        <option value="webhook">Webhook</option>
+                      </select>
+                      <textarea
+                        bind:value={editChConfig}
+                        placeholder={editChType === 'email'
+                          ? 'JSON: host, port, username, password, from, to, use_tls, starttls'
+                          : '{"url":"https://…","method":"POST"}'}
+                        rows="6"
+                      ></textarea>
+                      <div class="item-actions channel-edit-actions">
+                        <button type="button" class="btn-save" on:click={saveEditedChannel}>Save</button>
+                        <button type="button" class="btn-secondary" on:click={cancelEditChannel}>Cancel</button>
+                      </div>
+                    </div>
+                  {:else}
+                    <div>
+                      <strong>{ch.name}</strong>
+                      <span class="item-detail">{ch.type}</span>
+                    </div>
+                    <div class="item-actions">
+                      <button type="button" class="btn-secondary" on:click={() => startEditChannel(ch)}>Edit</button>
+                      <button type="button" class="btn-secondary" on:click={() => testChannel(ch.id)}>Test</button>
+                      <button type="button" class="btn-delete" on:click={() => removeChannel(ch.id)}>Delete</button>
+                    </div>
+                  {/if}
                 </div>
               {/each}
             </div>
@@ -450,6 +556,7 @@
         <div class="section">
           <h3>Connected Servers</h3>
           <p class="hint">Each server is an agent (or the local node in <code>serve</code> mode). The <strong>API key</strong> is used by <code>tracelog agent --hub … --key …</code>. Deleting a server removes its metrics and stored logs for that server ID from TraceLog’s database.</p>
+          <p class="hint">Most tabs in Settings are <strong>hub-wide</strong>. <strong>Log Sources</strong> can target the local <code>serve</code> agent or a <strong>remote</strong> server row (see Log Sources tab); remote agents pull their file list from the hub periodically.</p>
           {#if servers.length === 0}
             <p class="hint">No servers registered.</p>
           {:else}
@@ -473,25 +580,52 @@
           <h3>Alert Rules</h3>
           <p class="hint">
             <strong>Metrics:</strong> if a value stays beyond the threshold for the <strong>duration</strong>, a notification is sent (then <strong>cooldown</strong> applies).
-            <strong> Ingested logs:</strong> each line stored in TraceLog (files, Apache/nginx as plain, app logs, etc.) is classified; when level matches the rule, notify immediately (cooldown only — no duration).
-            Docker stdout is only covered if those lines are ingested into TraceLog the same way; raw <em>Load logs</em> in the UI is not stored and does not trigger alerts.
+            <strong>Docker:</strong> uses each agent <code>docker stats</code> scrape; <code>docker_mem_pct</code> is memory used vs <em>container</em> cgroup limit (not host RAM). <code>docker_cpu_percent</code> is CPU share of the <em>host</em>. Optional container substring limits which containers are checked.
+            <strong>Ingested logs:</strong> each line stored in TraceLog (files, Apache/nginx as plain, app logs, etc.) is classified; when level matches the rule, notify immediately (cooldown only — no duration).
+            Container stderr/stdout only triggers log alerts if lines are <strong>ingested</strong> (e.g. json-file log + Log Source); UI <em>Load logs</em> on the server page does not store lines.
           </p>
-          <div class="add-form alert-form" class:alert-form-log={isLogAlertMetric(newAlertMetric)}>
+          <div
+            class="add-form alert-form"
+            class:alert-form-log={isLogAlertMetric(newAlertMetric)}
+            class:alert-form-docker={isDockerAlertMetric(newAlertMetric)}
+          >
             <select bind:value={newAlertMetric} class="alert-metric-select">
               <optgroup label="System metrics">
                 {#each metricAlerts as m}<option value={m}>{m}</option>{/each}
+              </optgroup>
+              <optgroup label="Docker containers">
+                {#each dockerAlertMetrics as dm}<option value={dm.id}>{dm.label}</option>{/each}
               </optgroup>
               <optgroup label="Ingested log level">
                 {#each logAlertMetrics as lm}<option value={lm.id}>{lm.label}</option>{/each}
               </optgroup>
             </select>
+            {#if isDockerAlertMetric(newAlertMetric)}
+              <select bind:value={newAlertServerId} class="alert-server-select" title="Agent host that runs Docker">
+                {#each servers as s}<option value={s.id}>{s.name} ({s.host || s.id.slice(0, 8)}…)</option>{/each}
+              </select>
+              <input
+                type="text"
+                class="docker-filter-inp"
+                bind:value={newDockerContainer}
+                placeholder="Container name contains (empty = all)"
+                title="Case-insensitive substring; leave empty to evaluate every container"
+              />
+            {/if}
             {#if !isLogAlertMetric(newAlertMetric)}
               <select bind:value={newAlertOp}>
                 <option value=">">{'>'}</option>
                 <option value=">=">{'>='}</option>
                 <option value="<">{'<'}</option>
               </select>
-              <input type="number" bind:value={newAlertThreshold} min="0" max="100" style="width:80px" />
+              <input
+                type="number"
+                bind:value={newAlertThreshold}
+                min="0"
+                max={isDockerAlertMetric(newAlertMetric) && newAlertMetric === 'docker_cpu_percent' ? 5000 : 100}
+                style="width:80px"
+                title={isDockerAlertMetric(newAlertMetric) ? 'Percent for docker_mem_pct; docker_cpu can exceed 100% on multi-core' : ''}
+              />
               <span class="hint-inline">for</span>
               <select bind:value={newAlertDuration}>
                 <option value={60}>1 min</option>
@@ -521,7 +655,20 @@
               {#each alertRules as rule (rule.id)}
                 <div class="item-row">
                   <div>
-                    <strong>{isLogAlertMetric(rule.metric) ? (logAlertMetrics.find((x) => x.id === rule.metric)?.label ?? rule.metric) : `${rule.metric} ${rule.operator} ${rule.threshold}`}</strong>
+                    <strong
+                      >{isLogAlertMetric(rule.metric)
+                        ? (logAlertMetrics.find((x) => x.id === rule.metric)?.label ?? rule.metric)
+                        : isDockerAlertMetric(rule.metric)
+                          ? `${dockerAlertMetrics.find((x) => x.id === rule.metric)?.label ?? rule.metric} ${rule.operator} ${rule.threshold}`
+                          : `${rule.metric} ${rule.operator} ${rule.threshold}`}</strong
+                    >
+                    {#if isDockerAlertMetric(rule.metric)}
+                      <span class="item-detail"
+                        >Server: {silenceServerLabel(rule.server_id)} · containers: {rule.docker_container?.trim()
+                          ? `contains “${rule.docker_container}”`
+                          : 'all'}</span
+                      >
+                    {/if}
                     <span class="item-detail">
                       {#if isLogAlertMetric(rule.metric)}
                         Cooldown: {Math.round((rule.cooldown_seconds ?? 0) / 60)} min between notifications
@@ -531,6 +678,28 @@
                     </span>
                   </div>
                   <button class="btn-delete" on:click={() => removeAlert(rule.id)}>Delete</button>
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </div>
+
+        <div class="section">
+          <h3>Recent alert notifications</h3>
+          <p class="hint">
+            Rows appear when the hub <strong>sends</strong> a notification (email/webhook) for a rule. Newest first. This is not a full audit trail.
+          </p>
+          {#if alertHistory.length === 0}
+            <p class="hint">None yet — trigger an alert or use Test on a notification channel.</p>
+          {:else}
+            <div class="item-list">
+              {#each alertHistory as row (row.id)}
+                <div class="item-row alert-history-row">
+                  <div>
+                    <span class="item-detail">{row.ts}</span>
+                    <span class="item-detail">Rule <code>{row.rule_id}</code> · {silenceServerLabel(row.server_id)}</span>
+                    <span class="item-detail alert-history-msg">{row.message}</span>
+                  </div>
                 </div>
               {/each}
             </div>
@@ -688,7 +857,19 @@
   .item-row strong { color: var(--text-primary); font-size: 0.85rem; }
   .item-detail { display: block; font-size: 0.75rem; color: var(--text-muted); }
   .api-key { font-family: monospace; font-size: 0.7rem; }
-  .item-actions { display: flex; gap: 0.5rem; }
+  .item-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+  .channel-edit-row { align-items: stretch; }
+  .channel-edit-fields {
+    display: flex; flex-direction: column; gap: 0.5rem; width: 100%; min-width: 0;
+  }
+  .channel-edit-fields input,
+  .channel-edit-fields select,
+  .channel-edit-fields textarea {
+    padding: 0.5rem; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text-primary); font-size: 0.85rem; box-sizing: border-box; width: 100%;
+  }
+  .channel-edit-fields textarea { font-family: monospace; font-size: 0.8rem; resize: vertical; min-height: 120px; }
+  .channel-edit-actions { justify-content: flex-end; }
   .btn-delete { padding: 0.3rem 0.7rem; background: none; border: 1px solid var(--border); color: var(--text-muted); border-radius: 6px; cursor: pointer; font-size: 0.75rem; }
   .btn-delete:hover { border-color: #f85149; color: #f85149; }
   .about-grid { display: flex; flex-direction: column; gap: 0.75rem; }
@@ -697,6 +878,9 @@
   .about-item strong, .about-item a { color: var(--text-primary); }
   .alert-metric-select { min-width: 200px; max-width: 100%; flex: 1 1 220px; }
   .alert-form-log { align-items: flex-end; }
+  .alert-form-docker { align-items: flex-end; }
+  .alert-server-select { min-width: 160px; flex: 1 1 140px; }
+  .docker-filter-inp { min-width: 180px; flex: 2 1 200px; }
   .ua-exclude-ta {
     width: 100%; min-height: 4rem; font-family: monospace; font-size: 0.78rem;
     padding: 0.5rem; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 8px;
@@ -707,6 +891,10 @@
   .ingest-levels { display: flex; flex-wrap: wrap; gap: 0.35rem 0.9rem; margin: 0.45rem 0; }
   .ingest-cb { font-size: 0.72rem; color: var(--text-secondary); cursor: pointer; user-select: none; }
   .ingest-save { margin-bottom: 0 !important; margin-top: 0.35rem; }
+  .add-form-logs { align-items: flex-end; }
+  .log-agent-select { min-width: 180px; flex: 1 1 160px; }
+  .alert-history-row { align-items: flex-start; }
+  .alert-history-msg { word-break: break-word; white-space: pre-wrap; color: var(--text-secondary); margin-top: 0.25rem; }
   @media (max-width: 900px) {
     .settings { padding: 1rem 0.5rem; }
     .settings-layout { flex-direction: column; gap: 0.75rem; }

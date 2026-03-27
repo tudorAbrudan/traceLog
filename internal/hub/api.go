@@ -340,6 +340,11 @@ func (h *Hub) accessStatsExcludeUAPatterns(ctx context.Context) []string {
 	return out
 }
 
+// accessStatsExcludeHubPathPrefix returns cfg.URLPathPrefix normalized (install: --url-prefix / TRACELOG_URL_PREFIX) so analytics omit hub UI, not the monitored app.
+func (h *Hub) accessStatsExcludeHubPathPrefix() string {
+	return models.NormalizeURLPathPrefix(h.cfg.URLPathPrefix)
+}
+
 // --- Access Logs / HTTP Analytics ---
 
 func (h *Hub) handleAccessLogStats(w http.ResponseWriter, r *http.Request) {
@@ -361,7 +366,8 @@ func (h *Hub) handleAccessLogStats(w http.ResponseWriter, r *http.Request) {
 	}
 	since := time.Now().Add(-d)
 	uaExclude := h.accessStatsExcludeUAPatterns(r.Context())
-	stats, err := h.store.GetAccessLogStats(r.Context(), id, since, topN, uaExclude)
+	hubPathEx := h.accessStatsExcludeHubPathPrefix()
+	stats, err := h.store.GetAccessLogStats(r.Context(), id, since, topN, uaExclude, hubPathEx)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to get access stats")
 		return
@@ -370,7 +376,7 @@ func (h *Hub) handleAccessLogStats(w http.ResponseWriter, r *http.Request) {
 	rules := h.loadAccessIPBlacklist(r.Context())
 	if len(rules) > 0 {
 		const capIPGroups = 15000
-		ipRows, err := h.store.GetAccessLogTopIPCounts(r.Context(), id, since, capIPGroups, uaExclude)
+		ipRows, err := h.store.GetAccessLogTopIPCounts(r.Context(), id, since, capIPGroups, uaExclude, hubPathEx)
 		if err != nil {
 			slog.Warn("access stats: top ip counts for blacklist", "error", err)
 		} else {
@@ -467,7 +473,7 @@ func (h *Hub) handleAccessBadRequests(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
-	logs, err := h.store.QueryAccessBadRequests(r.Context(), id, time.Now().Add(-d), ip, limit)
+	logs, err := h.store.QueryAccessBadRequests(r.Context(), id, time.Now().Add(-d), ip, limit, h.accessStatsExcludeHubPathPrefix())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to query bad requests")
 		return
@@ -477,7 +483,7 @@ func (h *Hub) handleAccessBadRequests(w http.ResponseWriter, r *http.Request) {
 
 func (h *Hub) handleRecentAccessLogs(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	logs, err := h.store.GetRecentAccessLogs(r.Context(), id, 200)
+	logs, err := h.store.GetRecentAccessLogs(r.Context(), id, 200, h.accessStatsExcludeHubPathPrefix())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to get access logs")
 		return
@@ -503,7 +509,14 @@ func (h *Hub) handleCreateLogSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	normalizeLogSource(&ls)
-	if err := validateLogSourceRecord(&ls); err != nil {
+	ls.ServerID = strings.TrimSpace(ls.ServerID)
+	localID, err := h.EnsureLocalServer(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to resolve local server: %v", err)
+		return
+	}
+	remoteOnly := ls.ServerID != "" && ls.ServerID != localID
+	if err := validateLogSourceRecord(&ls, remoteOnly); err != nil {
 		writeError(w, http.StatusBadRequest, "%v", err)
 		return
 	}
@@ -558,6 +571,48 @@ func (h *Hub) handleDeleteLogSource(w http.ResponseWriter, r *http.Request) {
 	}
 	h.reloadLogIngestRules(r.Context())
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// handleAgentLogSources returns file log sources for the server matching X-API-Key (remote agent polling).
+func (h *Hub) handleAgentLogSources(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	key := strings.TrimSpace(r.Header.Get("X-API-Key"))
+	if key == "" {
+		writeError(w, http.StatusUnauthorized, "Missing X-API-Key")
+		return
+	}
+	srv, err := h.store.GetServerByAPIKey(r.Context(), key)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Invalid API key")
+		return
+	}
+	sources, err := h.store.ListLogSourcesForAgentServer(r.Context(), srv.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to list log sources: %v", err)
+		return
+	}
+	if sources == nil {
+		sources = []models.LogSource{}
+	}
+	writeJSON(w, http.StatusOK, sources)
+}
+
+func (h *Hub) handleListAlertHistory(w http.ResponseWriter, r *http.Request) {
+	limit := 100
+	if s := r.URL.Query().Get("limit"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil {
+			limit = n
+		}
+	}
+	rows, err := h.store.ListAlertHistoryRecent(r.Context(), limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to list alert history: %v", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, rows)
 }
 
 // --- Settings ---
@@ -683,6 +738,13 @@ func (h *Hub) handleCreateAlertRule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "metric and operator are required")
 		return
 	}
+	if alerts.IsDockerResourceMetric(rule.Metric) {
+		rule.DockerContainer = strings.TrimSpace(rule.DockerContainer)
+		if strings.TrimSpace(rule.ServerID) == "" {
+			writeError(w, http.StatusBadRequest, "server_id is required for Docker metric alerts")
+			return
+		}
+	}
 	if err := h.store.CreateAlertRule(r.Context(), &rule); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to create alert rule: %v", err)
 		return
@@ -784,6 +846,30 @@ func (h *Hub) handleCreateNotificationChannel(w http.ResponseWriter, r *http.Req
 	}
 	h.notify.AddChannel(&ch)
 	writeJSON(w, http.StatusCreated, ch)
+}
+
+func (h *Hub) handleUpdateNotificationChannel(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var ch notify.Channel
+	if err := json.NewDecoder(r.Body).Decode(&ch); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	ch.ID = id
+	if ch.Name == "" || ch.Type == "" {
+		writeError(w, http.StatusBadRequest, "name and type are required")
+		return
+	}
+	if err := h.store.UpdateNotificationChannel(r.Context(), &ch); err != nil {
+		if errors.Is(err, store.ErrNotificationChannelNotFound) {
+			writeError(w, http.StatusNotFound, "Notification channel not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "Failed to update notification channel: %v", err)
+		return
+	}
+	h.notify.AddChannel(&ch)
+	writeJSON(w, http.StatusOK, ch)
 }
 
 func (h *Hub) handleDeleteNotificationChannel(w http.ResponseWriter, r *http.Request) {

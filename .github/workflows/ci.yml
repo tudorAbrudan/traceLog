@@ -20,6 +20,8 @@ jobs:
           node-version: "20"
       - name: Build frontend (go:embed)
         run: make web-build
+      - name: Svelte and TypeScript check
+        run: cd web && npm run check
       # Prebuilt golangci-lint releases are built with an older Go and refuse go.mod > that version.
       # Building from source with the same toolchain as the project fixes "targeted Go version" errors.
       - name: Install golangci-lint
@@ -40,6 +42,10 @@ jobs:
           node-version: "20"
       - name: Build frontend (go:embed)
         run: make web-build
+      - name: Svelte and TypeScript check
+        run: cd web && npm run check
+      - name: Vitest (pass with no tests)
+        run: cd web && npx vitest run --passWithNoTests
       - run: go test -race -coverprofile=coverage.out ./...
       - uses: actions/upload-artifact@v4
         with:

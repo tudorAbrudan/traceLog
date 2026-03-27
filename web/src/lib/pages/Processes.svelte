@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { get } from 'svelte/store';
   import { api } from '../api';
+  import { contextServerId } from '../store';
 
   let servers: any[] = [];
   let selectedServer = '';
@@ -10,18 +12,25 @@
   let sortBy = 'cpu_percent';
   let sortDir: 'asc' | 'desc' = 'desc';
 
-  onMount(async () => {
-    try {
-      servers = await api.listServers();
-      if (servers.length > 0) {
-        selectedServer = servers[0].id;
-        await loadProcesses();
+  onMount(() => {
+    void (async () => {
+      try {
+        servers = await api.listServers();
+        if (servers.length > 0) {
+          const ctx = get(contextServerId);
+          if (ctx && servers.some((s) => s.id === ctx)) {
+            selectedServer = ctx;
+          } else {
+            selectedServer = servers[0].id;
+          }
+          await loadProcesses();
+        }
+      } catch (e) {
+        console.error('Failed to load servers', e);
+      } finally {
+        loading = false;
       }
-    } catch (e) {
-      console.error('Failed to load servers', e);
-    } finally {
-      loading = false;
-    }
+    })();
 
     const interval = setInterval(loadProcesses, 10000);
     return () => clearInterval(interval);
@@ -64,13 +73,27 @@
 
 <div class="processes">
   <p class="page-hint">
-    Linux: processes that look like they run <strong>inside Docker/containerd/Kubernetes cgroups</strong> are hidden so this list focuses on the host. Other OSes show all sampled processes. This is not a full container inventory — use <strong>Server → Docker</strong> for per-container stats.
+    <strong>Linux:</strong> PIDs that appear to run under <strong>Docker / containerd / Kubernetes cgroups</strong> are hidden so this page emphasizes
+    <strong>host</strong> services (e.g. nginx, TraceLog), not every process inside containers. That is why you see <strong>fewer rows than htop</strong>,
+    which lists the full PID space on the machine.
+  </p>
+  <p class="page-hint page-hint-second">
+    <strong>Docker workloads:</strong> open the server in <strong>Servers</strong> and scroll to <strong>Docker &amp; container logs</strong> (or from <strong>Logs</strong>,
+    use <strong>Open … → Docker</strong>). That section lists containers from collected metrics, shows latest <strong>CPU / memory</strong> (including memory % of
+    container limit), and can load container stdout/stderr. It is <strong>not</strong> a process list
+    like htop — for that use SSH: <code>docker top &lt;container&gt;</code>, <code>docker exec … ps</code>, or htop with cgroup columns.
   </p>
   <div class="header">
     <h2>Processes</h2>
     <div class="controls">
       {#if servers.length > 1}
-        <select bind:value={selectedServer} on:change={() => loadProcesses(false)}>
+        <select
+          bind:value={selectedServer}
+          on:change={() => {
+            contextServerId.set(selectedServer);
+            loadProcesses(false);
+          }}
+        >
           {#each servers as s}
             <option value={s.id}>{s.name}</option>
           {/each}
@@ -130,9 +153,16 @@
 <style>
   .processes { padding: 1.5rem; max-width: 1400px; }
   .page-hint {
-    font-size: 0.8rem; color: var(--text-secondary); line-height: 1.45; margin: 0 0 1rem 0;
+    font-size: 0.8rem; color: var(--text-secondary); line-height: 1.45; margin: 0 0 0.5rem 0;
     padding: 0.65rem 0.85rem; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px;
   }
+  .page-hint code {
+    font-size: 0.78em;
+    background: var(--bg-primary);
+    padding: 1px 4px;
+    border-radius: 4px;
+  }
+  .page-hint-second { margin-bottom: 1rem; }
   .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
   h2 { margin: 0; font-size: 1.3rem; color: var(--text-primary); }
   .controls { display: flex; align-items: center; gap: 0.75rem; }

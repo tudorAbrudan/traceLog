@@ -12,15 +12,16 @@ import (
 )
 
 type Rule struct {
-	ID         string  `json:"id"`
-	ServerID   string  `json:"server_id"`
-	Metric     string  `json:"metric"`
-	Operator   string  `json:"operator"`
-	Threshold  float64 `json:"threshold"`
-	DurationS  int     `json:"duration_seconds"`
-	CooldownS  int     `json:"cooldown_seconds"`
-	ChannelID  string  `json:"channel_id"`
-	Enabled    bool    `json:"enabled"`
+	ID              string  `json:"id"`
+	ServerID        string  `json:"server_id"`
+	Metric          string  `json:"metric"`
+	Operator        string  `json:"operator"`
+	Threshold       float64 `json:"threshold"`
+	DurationS       int     `json:"duration_seconds"`
+	CooldownS       int     `json:"cooldown_seconds"`
+	ChannelID       string  `json:"channel_id"`
+	DockerContainer string  `json:"docker_container"` // substring match on container name; empty = all containers
+	Enabled         bool    `json:"enabled"`
 }
 
 type Alert struct {
@@ -65,8 +66,17 @@ func (e *Engine) RemoveRule(id string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	delete(e.rules, id)
-	delete(e.lastFired, id)
-	delete(e.violations, id)
+	prefix := id + "\x1e"
+	for k := range e.lastFired {
+		if k == id || strings.HasPrefix(k, prefix) {
+			delete(e.lastFired, k)
+		}
+	}
+	for k := range e.violations {
+		if k == id || strings.HasPrefix(k, prefix) {
+			delete(e.violations, k)
+		}
+	}
 }
 
 func (e *Engine) Evaluate(ctx context.Context, serverID string, metrics *models.SystemMetrics) {
@@ -77,7 +87,7 @@ func (e *Engine) Evaluate(ctx context.Context, serverID string, metrics *models.
 		if !rule.Enabled || rule.ServerID != serverID {
 			continue
 		}
-		if IsLogMetricRule(rule.Metric) {
+		if IsLogMetricRule(rule.Metric) || IsDockerResourceMetric(rule.Metric) {
 			continue
 		}
 
@@ -90,7 +100,7 @@ func (e *Engine) Evaluate(ctx context.Context, serverID string, metrics *models.
 			}
 			violationStart := e.violations[rule.ID]
 			if time.Since(violationStart) >= time.Duration(rule.DurationS)*time.Second {
-				e.doFireUnlocked(ctx, rule, func() *Alert {
+				e.doFireUnlocked(ctx, rule, "", func() *Alert {
 					return &Alert{
 						RuleID:    rule.ID,
 						ServerID:  rule.ServerID,
@@ -142,7 +152,7 @@ func (e *Engine) fireLogAlert(ctx context.Context, rule *Rule, level, source, ms
 	if len([]rune(preview)) > 400 {
 		preview = string([]rune(preview)[:400]) + "…"
 	}
-	e.doFireUnlocked(ctx, rule, func() *Alert {
+	e.doFireUnlocked(ctx, rule, "", func() *Alert {
 		return &Alert{
 			RuleID:    rule.ID,
 			ServerID:  rule.ServerID,
@@ -156,8 +166,13 @@ func (e *Engine) fireLogAlert(ctx context.Context, rule *Rule, level, source, ms
 }
 
 // doFireUnlocked requires e.mu locked (Evaluate path) or is called from fireLogAlert after Lock.
-func (e *Engine) doFireUnlocked(ctx context.Context, rule *Rule, buildAlert func() *Alert, warnMsg string, warnKV ...any) {
-	lastFired, ok := e.lastFired[rule.ID]
+// fireKeySuffix empty uses rule.ID for cooldown; non-empty uses rule.ID + "\x1e" + suffix (per Docker container).
+func (e *Engine) doFireUnlocked(ctx context.Context, rule *Rule, fireKeySuffix string, buildAlert func() *Alert, warnMsg string, warnKV ...any) {
+	fireKey := rule.ID
+	if fireKeySuffix != "" {
+		fireKey = rule.ID + "\x1e" + fireKeySuffix
+	}
+	lastFired, ok := e.lastFired[fireKey]
 	cooldown := time.Duration(rule.CooldownS) * time.Second
 	if cooldown == 0 {
 		cooldown = 5 * time.Minute
@@ -169,7 +184,7 @@ func (e *Engine) doFireUnlocked(ctx context.Context, rule *Rule, buildAlert func
 	alert := buildAlert()
 	slog.Warn(warnMsg, warnKV...)
 
-	e.lastFired[rule.ID] = time.Now()
+	e.lastFired[fireKey] = time.Now()
 
 	ch := rule.ChannelID
 	if e.notifyFunc != nil && ch != "" {

@@ -3,7 +3,7 @@
   import { get } from 'svelte/store';
   import { api } from '../api';
   import ServerCard from '../components/ServerCard.svelte';
-  import { currentPage, suppressSingleServerAutoOpen } from '../store';
+  import { contextServerId, currentPage, suppressSingleServerAutoOpen } from '../store';
 
   /** One auto-jump to the lone server per tab session; blocks stray Overview ticks from changing the route again. */
   const SINGLE_SERVER_AUTO_NAV_KEY = 'tracelog-single-server-auto-nav-done';
@@ -46,6 +46,7 @@
     } catch {
       /* private mode */
     }
+    contextServerId.set(servers[0].id);
     currentPage.set('server:' + servers[0].id);
     try {
       sessionStorage.setItem(SINGLE_SERVER_AUTO_NAV_KEY, '1');
@@ -68,6 +69,7 @@
       await refreshServerList();
       autoNavResolved = true;
       if (servers.length === 1 && !get(suppressSingleServerAutoOpen)) {
+        contextServerId.set(servers[0].id);
         currentPage.set('server:' + servers[0].id);
         try {
           sessionStorage.setItem(SINGLE_SERVER_AUTO_NAV_KEY, '1');

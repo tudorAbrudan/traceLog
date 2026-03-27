@@ -13,7 +13,7 @@ func (s *Store) ListAlertRules(ctx context.Context) ([]alerts.Rule, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, COALESCE(server_id, ''), metric, operator, threshold,
 		        COALESCE(duration_seconds, 0), COALESCE(cooldown_minutes, 30),
-		        COALESCE(notify_channels, ''), enabled
+		        COALESCE(notify_channels, ''), COALESCE(docker_container, ''), enabled
 		 FROM alert_rules ORDER BY metric`)
 	if err != nil {
 		return nil, err
@@ -25,7 +25,7 @@ func (s *Store) ListAlertRules(ctx context.Context) ([]alerts.Rule, error) {
 		var r alerts.Rule
 		var enabled int
 		if err := rows.Scan(&r.ID, &r.ServerID, &r.Metric, &r.Operator, &r.Threshold,
-			&r.DurationS, &r.CooldownS, &r.ChannelID, &enabled); err != nil {
+			&r.DurationS, &r.CooldownS, &r.ChannelID, &r.DockerContainer, &enabled); err != nil {
 			return nil, err
 		}
 		r.CooldownS = r.CooldownS * 60
@@ -52,9 +52,9 @@ func (s *Store) CreateAlertRule(ctx context.Context, r *alerts.Rule) error {
 		cooldownMin = 30
 	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO alert_rules (id, server_id, metric, operator, threshold, duration_seconds, cooldown_minutes, notify_channels, enabled)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		r.ID, r.ServerID, r.Metric, r.Operator, r.Threshold, r.DurationS, cooldownMin, r.ChannelID, enabled,
+		`INSERT INTO alert_rules (id, server_id, metric, operator, threshold, duration_seconds, cooldown_minutes, notify_channels, docker_container, enabled)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		r.ID, r.ServerID, r.Metric, r.Operator, r.Threshold, r.DurationS, cooldownMin, r.ChannelID, r.DockerContainer, enabled,
 	)
 	return err
 }

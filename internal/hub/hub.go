@@ -50,6 +50,9 @@ func New(cfg *models.Config) (*Hub, error) {
 	notifyMgr := notify.NewManager()
 
 	alertEngine := alerts.NewEngine(func(ctx context.Context, channelID string, alert *alerts.Alert) error {
+		if err := s.InsertAlertHistory(ctx, alert.RuleID, alert.ServerID, "fired", alert.Message); err != nil {
+			slog.Debug("alert history insert", "error", err)
+		}
 		return notifyMgr.Send(ctx, channelID, "TraceLog Alert: "+alert.Metric, alert.Message)
 	})
 
@@ -97,6 +100,12 @@ func (h *Hub) IngestDockerMetrics(ctx context.Context, metrics []models.DockerMe
 		}
 	}
 	h.ingestDocker.Add(uint64(len(metrics)))
+	if h.alerts != nil && len(metrics) > 0 {
+		sid := metrics[0].ServerID
+		if sid != "" {
+			h.alerts.EvaluateDocker(ctx, sid, metrics)
+		}
+	}
 	return nil
 }
 
@@ -302,6 +311,8 @@ func (h *Hub) registerRoutes() {
 	h.mux.HandleFunc("POST /api/alerts", auth(csrf(h.handleCreateAlertRule)))
 	h.mux.HandleFunc("DELETE /api/alerts/{id}", auth(csrf(h.handleDeleteAlertRule)))
 
+	h.mux.HandleFunc("GET /api/alert-history", auth(h.handleListAlertHistory))
+
 	h.mux.HandleFunc("GET /api/log-alert-silences", auth(h.handleListLogAlertSilences))
 	h.mux.HandleFunc("POST /api/log-alert-silences", auth(csrf(h.handleCreateLogAlertSilence)))
 	h.mux.HandleFunc("DELETE /api/log-alert-silences/{id}", auth(csrf(h.handleDeleteLogAlertSilence)))
@@ -309,8 +320,12 @@ func (h *Hub) registerRoutes() {
 	// Notification channels
 	h.mux.HandleFunc("GET /api/notifications", auth(h.handleListNotificationChannels))
 	h.mux.HandleFunc("POST /api/notifications", auth(csrf(h.handleCreateNotificationChannel)))
+	h.mux.HandleFunc("PUT /api/notifications/{id}", auth(csrf(h.handleUpdateNotificationChannel)))
 	h.mux.HandleFunc("DELETE /api/notifications/{id}", auth(csrf(h.handleDeleteNotificationChannel)))
 	h.mux.HandleFunc("POST /api/notifications/{id}/test", auth(csrf(h.handleTestNotificationChannel)))
+
+	// Agent API key (no session): log source config for remote tail
+	h.mux.HandleFunc("GET /api/agent/log-sources", h.handleAgentLogSources)
 
 	// WebSocket for agent connections
 	h.mux.HandleFunc("GET /api/ws/agent", h.handleAgentWS)

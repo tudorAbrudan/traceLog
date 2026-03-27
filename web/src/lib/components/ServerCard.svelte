@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { currentPage, navDrawerOpen, suppressSingleServerAutoOpen } from '../store';
+  import { contextServerId, currentPage, navDrawerOpen, suppressSingleServerAutoOpen } from '../store';
   import { api } from '../api';
 
   export let server: any;
@@ -25,6 +25,7 @@
 
   function openDetail() {
     suppressSingleServerAutoOpen.set(true);
+    contextServerId.set(server.id);
     currentPage.set(`server:${server.id}`);
     navDrawerOpen.set(false);
   }

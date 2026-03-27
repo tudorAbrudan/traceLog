@@ -28,6 +28,7 @@ type AlertRule struct {
 	DurationSeconds int       `json:"duration_seconds"`
 	CooldownMinutes int       `json:"cooldown_minutes"`
 	NotifyChannels  string    `json:"notify_channels"`
+	DockerContainer string    `json:"docker_container,omitempty"`
 	State           string    `json:"state"`
 	LastTriggeredAt time.Time `json:"last_triggered_at,omitempty"`
 	Enabled         bool      `json:"enabled"`

@@ -1,10 +1,13 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { api } from '../api';
   import Chart from '../components/Chart.svelte';
-  import { currentPage, suppressSingleServerAutoOpen } from '../store';
+  import DockerLogsPanel from '../components/DockerLogsPanel.svelte';
+  import { contextServerId, currentPage, suppressSingleServerAutoOpen } from '../store';
 
   export let serverId = '';
+
+  $: if (serverId) contextServerId.set(serverId);
 
   let server: any = null;
   let metrics: any[] = [];
@@ -36,7 +39,17 @@
   }
 
   onMount(() => {
-    loadData();
+    void loadData().then(async () => {
+      await tick();
+      try {
+        if (sessionStorage.getItem('tracelog-focus-docker') === '1') {
+          sessionStorage.removeItem('tracelog-focus-docker');
+          document.getElementById('tracelog-docker-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      } catch {
+        /* ignore */
+      }
+    });
     const interval = setInterval(loadData, 15000);
     return () => clearInterval(interval);
   });
@@ -154,12 +167,45 @@
       </div>
     </div>
   {/if}
+
+  <section id="tracelog-docker-section" class="docker-section" aria-label="Docker containers">
+    <h3 class="docker-section-title">Docker</h3>
+    <p class="docker-section-lead">
+      Per-container CPU/memory from the agent’s <code>docker stats</code> scrape. Load logs runs on the agent host. For raw container output to trigger
+      <strong>ingested log alerts</strong>, ship logs to a file or syslog and add a Log Source (see docs) — UI “Load logs” does not store lines in the database.
+    </p>
+    <DockerLogsPanel serverId={serverId} logFilter="all" />
+  </section>
 </div>
 
 <style>
   .detail {
     padding: 1.5rem;
     max-width: 1200px;
+  }
+
+  .docker-section {
+    margin-top: 2rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--border);
+  }
+  .docker-section-title {
+    margin: 0 0 0.35rem 0;
+    font-size: 1rem;
+    color: var(--text-primary);
+  }
+  .docker-section-lead {
+    margin: 0 0 0.75rem 0;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    line-height: 1.45;
+    max-width: 52rem;
+  }
+  .docker-section-lead code {
+    font-size: 0.85em;
+    background: var(--bg-secondary);
+    padding: 1px 5px;
+    border-radius: 4px;
   }
 
   .top-bar {

@@ -54,7 +54,7 @@ func TestValidateLogSourceRecord(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ls := tt.ls
 			normalizeLogSource(&ls)
-			err := validateLogSourceRecord(&ls)
+			err := validateLogSourceRecord(&ls, false)
 			if tt.wantErr == "" {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)

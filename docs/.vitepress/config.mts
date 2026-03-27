@@ -18,6 +18,7 @@ export default defineConfig({
         items: [
           { text: 'Quick Start', link: '/guide/quickstart' },
           { text: 'Configuration', link: '/guide/configuration' },
+          { text: 'Product scope & FAQ', link: '/guide/product-scope' },
         ],
       },
       {
@@ -25,6 +26,7 @@ export default defineConfig({
         items: [
           { text: 'Multi-Server Setup', link: '/guide/multi-server' },
           { text: 'Alerts', link: '/guide/alerts' },
+          { text: 'Docker monitoring', link: '/guide/docker-monitoring' },
           { text: 'Reverse Proxy', link: '/guide/reverse-proxy' },
           { text: 'Logs & HTTP analytics', link: '/guide/logs-http-analytics' },
         ],

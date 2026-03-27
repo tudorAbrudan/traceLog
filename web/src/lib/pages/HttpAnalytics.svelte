@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { get } from 'svelte/store';
   import { api } from '../api';
+  import { contextServerId } from '../store';
 
   let servers: any[] = [];
   let selectedServer = '';
@@ -41,7 +43,12 @@
       try {
         servers = await api.listServers();
         if (servers.length > 0) {
-          selectedServer = servers[0].id;
+          const ctx = get(contextServerId);
+          if (ctx && servers.some((s) => s.id === ctx)) {
+            selectedServer = ctx;
+          } else {
+            selectedServer = servers[0].id;
+          }
           await loadData();
         }
       } catch (e) {
@@ -124,6 +131,55 @@
     refreshBadRequests();
   }
 
+  /** Non-empty, non-comment lines (same rules as save). */
+  function parseBlacklistLines(raw: string): string[] {
+    return raw
+      .split('\n')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0 && !s.startsWith('#'));
+  }
+
+  function nginxDenySnippetFromLines(lines: string[]): string {
+    const header = `# TraceLog — nginx deny directives (NOT applied by TraceLog)
+# Add this block inside http { }, server { }, or location { } on the host that terminates TLS.
+# Test before reload: sudo nginx -t && sudo systemctl reload nginx
+# Behind CDN/proxy: set real_ip / trusted headers so the address you deny matches logged clients.
+`;
+    const body = lines.map((l) => `deny ${l};`).join('\n');
+    return `${header}\n${body}\n`;
+  }
+
+  async function copyNginxDenySnippet() {
+    const lines = parseBlacklistLines(blacklistText);
+    if (lines.length === 0) {
+      alert('Add at least one IP or CIDR line (one per line), then try again.');
+      return;
+    }
+    const snip = nginxDenySnippetFromLines(lines);
+    try {
+      await navigator.clipboard.writeText(snip);
+      alert('Nginx snippet copied to clipboard. Paste into your server config, test with nginx -t, then reload.');
+    } catch {
+      window.prompt('Copy this snippet (Ctrl+C):', snip);
+    }
+  }
+
+  function downloadNginxDenySnippet() {
+    const lines = parseBlacklistLines(blacklistText);
+    if (lines.length === 0) {
+      alert('Add at least one IP or CIDR line (one per line), then try again.');
+      return;
+    }
+    const snip = nginxDenySnippetFromLines(lines);
+    const blob = new Blob([snip], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'tracelog-ip-deny-snippet.conf';
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   function statusClass(code: number): string {
     if (code >= 500) return 'status-5xx';
     if (code >= 400) return 'status-4xx';
@@ -140,6 +196,7 @@
         <select
           bind:value={selectedServer}
           on:change={() => {
+            contextServerId.set(selectedServer);
             blacklistDirty = false;
             loadData();
           }}
@@ -193,7 +250,7 @@
       </div>
       <div class="stat-card">
         <span class="stat-value" class:danger={stats.blacklisted_hits > 0}>{stats.blacklisted_hits?.toLocaleString?.() ?? 0}</span>
-        <span class="stat-label">Req. from blacklist (est.)</span>
+        <span class="stat-label">Req. from IP list (est., analytics only)</span>
         {#if stats.blacklist_hits_note}
           <span class="stat-sublabel">{stats.blacklist_hits_note}</span>
         {/if}
@@ -211,11 +268,31 @@
     </div>
 
     <div class="policy-box">
-      <h3>IP blacklist (analytics)</h3>
+      <h3>IP list — analytics &amp; nginx export</h3>
       <p class="policy-hint">
-        One IP or CIDR per line (e.g. <code>203.0.113.50</code> or <code>10.0.0.0/8</code>).
-        TraceLog highlights matching traffic and estimates request volume; it does <strong>not</strong> block clients — use nginx,
-        firewall, or your CDN for that.
+        <strong>What TraceLog does with this list</strong> (after you click <em>Save</em>): it stores the lines in the hub database
+        and uses them only inside <strong>HTTP Analytics</strong> — to <strong>highlight</strong> matching client IPs in the tables
+        and to show the <strong>“Req. from blacklist (est.)”</strong> counter. Data is whatever was already ingested from your access
+        logs; nothing is changed on disk and <strong>no requests are refused</strong> by TraceLog.
+      </p>
+      <ul class="policy-list">
+        <li>
+          <strong>Not a firewall:</strong> visitors can still reach your site (e.g. <code>https://cadourile.ro/</code>). To actually
+          <strong>block</strong> addresses, configure <strong>nginx</strong> <code>deny</code>, a <strong>firewall</strong>, or your
+          <strong>CDN</strong> / WAF.
+        </li>
+        <li>
+          <strong>Export for nginx:</strong> use the buttons below to generate <code>deny …;</code> lines from the textarea (saved or
+          not). You edit and reload nginx yourself — TraceLog does not modify the server.
+        </li>
+        <li>
+          <strong>Why this lives on HTTP Analytics:</strong> the list is meant to be tuned while you look at <strong>top IPs</strong> and
+          error traffic on the same page; blocking itself always happens outside TraceLog.
+        </li>
+      </ul>
+      <p class="policy-hint policy-format">
+        Format: one IP or CIDR per line (e.g. <code>203.0.113.50</code> or <code>10.0.0.0/8</code>). Lines starting with
+        <code>#</code> are ignored for export.
         <a class="doc-ref" href="https://tudorAbrudan.github.io/traceLog/guide/logs-http-analytics" target="_blank" rel="noopener noreferrer">Docs</a>
       </p>
       <textarea
@@ -224,8 +301,13 @@
         on:input={() => (blacklistDirty = true)}
         rows="4"
         placeholder="10.0.0.0/8&#10;192.0.2.1"
+        aria-label="IP list for analytics and nginx export"
       ></textarea>
-      <button type="button" class="btn-save-bl" disabled={savingBl} on:click={saveBlacklist}>{savingBl ? 'Saving…' : 'Save blacklist'}</button>
+      <div class="policy-actions">
+        <button type="button" class="btn-save-bl" disabled={savingBl} on:click={saveBlacklist}>{savingBl ? 'Saving…' : 'Save list'}</button>
+        <button type="button" class="btn-export-bl" on:click={copyNginxDenySnippet}>Copy nginx deny snippet</button>
+        <button type="button" class="btn-export-bl" on:click={downloadNginxDenySnippet}>Download .conf</button>
+      </div>
     </div>
 
     <div class="tables-row three">
@@ -449,16 +531,31 @@
     padding: 0.85rem 1rem; margin-bottom: 1rem;
   }
   .policy-hint { font-size: 0.78rem; color: var(--text-muted); margin: 0 0 0.5rem; line-height: 1.45; }
+  .policy-hint.policy-format { margin-top: 0.35rem; }
+  .policy-list {
+    margin: 0 0 0.5rem 0; padding-left: 1.15rem; font-size: 0.78rem; color: var(--text-secondary); line-height: 1.45;
+  }
+  .policy-list li { margin-bottom: 0.35rem; }
+  .policy-list li:last-child { margin-bottom: 0; }
   .policy-ta {
     width: 100%; min-height: 4.5rem; font-family: monospace; font-size: 0.78rem;
     padding: 0.5rem; border-radius: 8px; border: 1px solid var(--border);
     background: var(--bg-primary); color: var(--text-primary); resize: vertical;
   }
+  .policy-actions {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.5rem;
+  }
   .btn-save-bl {
-    margin-top: 0.5rem; padding: 0.4rem 1rem; font-size: 0.8rem; font-weight: 600;
+    padding: 0.4rem 1rem; font-size: 0.8rem; font-weight: 600;
     border-radius: 8px; border: none; cursor: pointer; background: #238636; color: #fff;
   }
   .btn-save-bl:disabled { opacity: 0.6; cursor: wait; }
+  .btn-export-bl {
+    padding: 0.4rem 0.85rem; font-size: 0.78rem; font-weight: 600;
+    border-radius: 8px; cursor: pointer; border: 1px solid var(--border);
+    background: var(--bg-primary); color: var(--text-primary);
+  }
+  .btn-export-bl:hover { border-color: var(--accent); color: var(--accent); }
 
   .tables-row {
     display: grid; gap: 0.75rem; margin-bottom: 1.25rem;

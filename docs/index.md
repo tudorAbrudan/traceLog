@@ -30,4 +30,6 @@ features:
     details: HTTP endpoint checks with response time tracking and alerts.
   - title: Smart Alerts
     details: Email and webhook notifications with configurable thresholds.
+  - title: Log noise control
+    details: Mute specific ingested-log notifications by message substring (silences); lines stay in the database.
 ---

@@ -26,7 +26,7 @@
   let checking = true;
   let needsSetup = false;
 
-  onMount(async () => {
+  onMount(() => {
     const mq = window.matchMedia('(min-width: 901px)');
     const closeDrawer = () => {
       if (mq.matches) navDrawerOpen.set(false);
@@ -55,27 +55,29 @@
       }
     });
 
-    try {
-      const health = await api.health();
-      if (!health.setup_done) {
-        needsSetup = true;
-        checking = false;
-        return;
-      }
-    } catch {}
+    void (async () => {
+      try {
+        const health = await api.health();
+        if (!health.setup_done) {
+          needsSetup = true;
+          checking = false;
+          return;
+        }
+      } catch {}
 
-    try {
-      const res = await api.me();
-      if (res.user) {
-        user.set(res.user);
-        isAuthenticated.set(true);
-        api.setCsrfToken(res.csrf_token);
+      try {
+        const res = await api.me();
+        if (res.user) {
+          user.set(res.user);
+          isAuthenticated.set(true);
+          api.setCsrfToken(res.csrf_token);
+        }
+      } catch {
+        /* not authenticated */
+      } finally {
+        checking = false;
       }
-    } catch {
-      // Not authenticated
-    } finally {
-      checking = false;
-    }
+    })();
 
     return () => {
       mq.removeEventListener('change', closeDrawer);

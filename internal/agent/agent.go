@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/tudorAbrudan/tracelog/internal/agent/collector"
@@ -111,6 +112,10 @@ type Agent struct {
 	serverID    string
 	hubURL      string
 	apiKey      string
+
+	logMu                sync.Mutex
+	logSubCancel         context.CancelFunc
+	lastRemoteSourcesSig string
 }
 
 func New(cfg *models.Config, opts ...Option) (*Agent, error) {
@@ -156,10 +161,11 @@ func (a *Agent) Start(ctx context.Context) error {
 
 	if a.wsTransport != nil {
 		go a.wsTransport.ConnectWithRetry(ctx)
+		go a.runRemoteLogSourcePoller(ctx)
 	}
 
-	// Start log collectors
-	if len(a.cfg.Collect.LogSources) > 0 && a.transport != nil {
+	// Local log collectors (serve mode — paths from hub DB on this host)
+	if a.wsTransport == nil && len(a.cfg.Collect.LogSources) > 0 && a.transport != nil {
 		a.logs = collector.NewLogCollector(a.cfg.Collect.LogSources, func(entry *models.LogEntry) {
 			entry.ServerID = a.serverID
 			if err := a.transport.SendLog(ctx, entry); err != nil {
@@ -234,6 +240,12 @@ func (a *Agent) collectAndSend(ctx context.Context) {
 }
 
 func (a *Agent) Shutdown() {
+	a.logMu.Lock()
+	if a.logSubCancel != nil {
+		a.logSubCancel()
+		a.logSubCancel = nil
+	}
+	a.logMu.Unlock()
 	if a.transport != nil {
 		a.transport.Close()
 	}

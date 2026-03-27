@@ -28,14 +28,14 @@ web-dev:
 lint: web-build
 	golangci-lint run ./...
 	@if [ -f web/package.json ]; then \
-		cd web && npx eslint . ; \
+		cd web && npm run check && npx eslint . ; \
 	fi
 
 ## test: Run all tests (web-build required: hub uses go:embed dist)
 test: web-build
 	go test -race -count=1 ./...
 	@if [ -f web/package.json ]; then \
-		cd web && npx vitest run; \
+		cd web && npm run check && npx vitest run --passWithNoTests; \
 	fi
 
 ## fmt: Format code

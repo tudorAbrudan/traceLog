@@ -1,5 +1,15 @@
 package alerts
 
+// IsDockerResourceMetric is true for rules evaluated on per-container docker stats (not host system metrics).
+func IsDockerResourceMetric(metric string) bool {
+	switch metric {
+	case "docker_mem_pct", "docker_cpu_percent":
+		return true
+	default:
+		return false
+	}
+}
+
 // IsLogMetricRule is true for rules evaluated on ingested log lines (not system metrics).
 func IsLogMetricRule(metric string) bool {
 	switch metric {

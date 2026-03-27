@@ -46,6 +46,29 @@
     }
   }
 
+  function fmtBytes(b: number): string {
+    if (b == null || !Number.isFinite(b) || b < 0) return '—';
+    if (b >= 1073741824) return (b / 1073741824).toFixed(1) + ' GB';
+    if (b >= 1048576) return (b / 1048576).toFixed(1) + ' MB';
+    if (b >= 1024) return (b / 1024).toFixed(1) + ' KB';
+    return b + ' B';
+  }
+
+  /** Memory use as % of container cgroup limit (not host RAM %). */
+  function memPercentOfLimit(c: { mem_used?: number; mem_limit?: number }): number | null {
+    const u = c.mem_used;
+    const lim = c.mem_limit;
+    if (u == null || lim == null || lim <= 0) return null;
+    return (u / lim) * 100;
+  }
+
+  function memPctClass(p: number | null): string {
+    if (p == null) return '';
+    if (p >= 95) return 'mem-hot';
+    if (p >= 85) return 'mem-warn';
+    return '';
+  }
+
   function uniqueContainers(rows: any[]) {
     const m = new Map<string, any>();
     for (const r of rows) {
@@ -107,13 +130,42 @@
 
 <div class="docker-logs-panel">
   <div class="card-head docker-head">
-    <h3>Docker container logs</h3>
+    <h3>Docker containers</h3>
     <span class="hint"
-      >Runs <code>docker logs</code> on the machine for this local server (same as the agent host). The Logs page severity control filters these lines by keywords (not DB levels).</span>
+      ><strong>CPU %</strong> is from <code>docker stats</code> (share of the <em>host</em>, not per-container quota).
+      <strong>Mem % of limit</strong> is <code>mem_used / mem_limit</code> for that container — a high value here can mean OOM risk even when host RAM looks fine.
+      <code>Load logs</code> runs <code>docker logs</code> on the agent host. The Logs page severity menu filters loaded output by keywords (not ingested DB levels).</span>
   </div>
   {#if dockerList.length === 0}
-    <p class="docker-empty">No container metrics yet. Enable Docker collection and wait for the next scrape.</p>
+    <p class="docker-empty">No container metrics yet. Enable Docker collection on the agent and wait for the next scrape.</p>
   {:else}
+    <div class="docker-stats-wrap">
+      <table class="docker-stats-table">
+        <thead>
+          <tr>
+            <th>Container</th>
+            <th class="num" title="Host CPU share (docker stats)">CPU %<span class="th-sub">host</span></th>
+            <th class="num" title="Used / cgroup limit">Mem %<span class="th-sub">of limit</span></th>
+            <th class="num">Memory</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each dockerList as c}
+            {@const mp = memPercentOfLimit(c)}
+            <tr>
+              <td class="mono">{c.container_name || c.container_id || '—'}</td>
+              <td class="num">{c.cpu_percent != null ? c.cpu_percent.toFixed(1) : '—'}</td>
+              <td class="num {memPctClass(mp)}">{mp != null ? mp.toFixed(1) + '%' : '—'}</td>
+              <td class="num"
+                >{fmtBytes(c.mem_used)} / {c.mem_limit ? fmtBytes(c.mem_limit) : '—'}</td
+              >
+              <td class="dim">{c.status || '—'}</td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
     <div class="docker-toolbar">
       <select bind:value={selectedContainer}>
         <option value="">Select container…</option>
@@ -184,6 +236,62 @@
     font-size: 0.85rem;
     color: var(--text-muted);
     margin: 0;
+  }
+  .docker-stats-wrap {
+    overflow-x: auto;
+    margin-bottom: 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-primary);
+  }
+  .docker-stats-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.75rem;
+  }
+  .docker-stats-table th,
+  .docker-stats-table td {
+    padding: 0.35rem 0.5rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  .docker-stats-table th {
+    color: var(--text-muted);
+    font-weight: 600;
+  }
+  .docker-stats-table th.num,
+  .docker-stats-table td.num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .docker-stats-table td.mono {
+    font-family: ui-monospace, monospace;
+    max-width: 14rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .docker-stats-table td.dim {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+  }
+  .docker-stats-table td.mem-warn {
+    color: var(--warning);
+    font-weight: 600;
+  }
+  .docker-stats-table td.mem-hot {
+    color: var(--danger);
+    font-weight: 700;
+  }
+  .th-sub {
+    display: block;
+    font-size: 0.58rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .docker-stats-table tr:last-child td {
+    border-bottom: none;
   }
   .docker-toolbar {
     display: flex;

@@ -25,7 +25,10 @@ type EmailConfig struct {
 	Password string `json:"password"`
 	From     string `json:"from"`
 	To       string `json:"to"`
-	UseTLS   bool   `json:"use_tls"`
+	// UseTLS enables implicit TLS (SMTPS), typically port 465.
+	UseTLS bool `json:"use_tls"`
+	// StartTLS upgrades a plain SMTP connection with STARTTLS (e.g. Gmail on 587). Prefer this over use_tls for submission.
+	StartTLS bool `json:"starttls"`
 }
 
 type WebhookConfig struct {
@@ -90,8 +93,11 @@ func (m *Manager) sendEmail(_ context.Context, ch *Channel, subject, body string
 		mail.WithPassword(cfg.Password),
 		mail.WithSMTPAuth(mail.SMTPAuthPlain),
 	}
-	if cfg.UseTLS {
-		opts = append(opts, mail.WithSSLPort(false))
+	switch {
+	case cfg.UseTLS && cfg.Port == 465:
+		opts = append(opts, mail.WithSSL())
+	case cfg.StartTLS || cfg.UseTLS:
+		opts = append(opts, mail.WithTLSPortPolicy(mail.TLSMandatory))
 	}
 
 	client, err := mail.NewClient(cfg.Host, opts...)

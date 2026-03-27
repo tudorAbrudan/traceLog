@@ -9,6 +9,30 @@ import (
 	"github.com/tudorAbrudan/tracelog/internal/models"
 )
 
+// accessLogExcludeHubUIPrefixSQL drops rows whose path is under the hub’s public URL prefix (same as --url-prefix / TRACELOG_URL_PREFIX).
+// normalizedPrefix is the hub’s public path (from --url-prefix / TRACELOG_URL_PREFIX), e.g. "/monitor"; "" = no filter (hub at site root).
+func accessLogExcludeHubUIPrefixSQL(normalizedPrefix string) (cond string, args []any) {
+	p := strings.TrimSpace(normalizedPrefix)
+	if p == "" {
+		return "", nil
+	}
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	p = strings.TrimSuffix(p, "/")
+	p = strings.ToLower(p)
+	if p == "" || p == "/" {
+		return "", nil
+	}
+	cond = ` AND NOT (
+  LOWER(TRIM(COALESCE(path,''))) = ?
+  OR LOWER(TRIM(COALESCE(path,''))) LIKE ?
+  OR LOWER(TRIM(COALESCE(path,''))) LIKE ?
+)`
+	args = []any{p, p + "/%", p + "?%"}
+	return cond, args
+}
+
 // accessUAExcludeSQL builds AND NOT (INSTR(...) OR ...) to drop rows whose User-Agent contains any pattern (case-insensitive).
 func accessUAExcludeSQL(patterns []string) (cond string, args []any) {
 	var parts []string
@@ -80,9 +104,10 @@ type IPBadCount struct {
 
 // GetAccessLogStats aggregates HTTP access data. topN controls top paths, IPs, method+paths, and bad-by-IP rows (clamped 5–100).
 // excludeUASubstrings removes matching User-Agent rows from all aggregates (e.g. TraceLog’s own uptime probes).
+// excludeHubPathPrefix is the same normalized prefix as at install (not hardcoded): drop those paths from aggregates; empty skips.
 //
-//nolint:gosec // G202: baseWhere is `server_id = ? AND ts >= ?` plus accessUAExcludeSQL output (fixed INSTR… fragments only); UA substrings are bound as args.
-func (s *Store) GetAccessLogStats(ctx context.Context, serverID string, since time.Time, topN int, excludeUASubstrings []string) (*AccessLogStats, error) {
+//nolint:gosec // G202: baseWhere is fixed SQL + accessUAExcludeSQL (INSTR…?) + accessLogExcludeHubUIPrefixSQL (? bound); UA/prefix bound as args.
+func (s *Store) GetAccessLogStats(ctx context.Context, serverID string, since time.Time, topN int, excludeUASubstrings []string, excludeHubPathPrefix string) (*AccessLogStats, error) {
 	if topN < 5 {
 		topN = 5
 	}
@@ -94,30 +119,34 @@ func (s *Store) GetAccessLogStats(ctx context.Context, serverID string, since ti
 		StatusCodes: make(map[string]int),
 	}
 	uaCond, uaArgs := accessUAExcludeSQL(excludeUASubstrings)
+	pathCond, pathArgs := accessLogExcludeHubUIPrefixSQL(excludeHubPathPrefix)
 	baseArgs := []any{serverID, sinceStr}
-	baseWhere := `server_id = ? AND ts >= ?` + uaCond
+	baseWhere := `server_id = ? AND ts >= ?` + uaCond + pathCond
+
+	rowArgs := func() []any {
+		return append(append(append([]any{}, baseArgs...), uaArgs...), pathArgs...)
+	}
 
 	err := s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*), COALESCE(AVG(duration_ms), 0),
 		 COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1.0 ELSE 0.0 END) / NULLIF(COUNT(*), 0) * 100, 0)
 		 FROM access_logs WHERE `+baseWhere,
-		append(append([]any{}, baseArgs...), uaArgs...)...,
+		rowArgs()...,
 	).Scan(&stats.TotalRequests, &stats.AvgDuration, &stats.ErrorRate)
 	if err != nil {
 		return nil, err
 	}
 
-	uniqArgs := append(append([]any{}, baseArgs...), uaArgs...)
 	_ = s.db.QueryRowContext(ctx,
 		`SELECT COUNT(DISTINCT ip) FROM access_logs WHERE `+baseWhere+` AND ip != ''`,
-		uniqArgs...,
+		rowArgs()...,
 	).Scan(&stats.UniqueIPCount)
 
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT CAST(status_code / 100 AS TEXT) || 'xx', COUNT(*)
 		 FROM access_logs WHERE `+baseWhere+`
 		 GROUP BY CAST(status_code / 100 AS TEXT) ORDER BY 2 DESC`,
-		append(append([]any{}, baseArgs...), uaArgs...)...,
+		rowArgs()...,
 	)
 	if err == nil {
 		defer rows.Close()
@@ -131,7 +160,7 @@ func (s *Store) GetAccessLogStats(ctx context.Context, serverID string, since ti
 		}
 	}
 
-	qArgs := append(append([]any{}, baseArgs...), uaArgs...)
+	qArgs := rowArgs()
 	rows, err = s.db.QueryContext(ctx,
 		`SELECT path, COUNT(*) as cnt FROM access_logs
 		 WHERE `+baseWhere+` GROUP BY path ORDER BY cnt DESC LIMIT ?`,
@@ -206,8 +235,8 @@ func (s *Store) GetAccessLogStats(ctx context.Context, serverID string, since ti
 
 // GetAccessLogTopIPCounts returns IPs ordered by request count (for blacklist estimation).
 //
-//nolint:gosec // G202: same WHERE construction as GetAccessLogStats (accessUAExcludeSQL + bound args).
-func (s *Store) GetAccessLogTopIPCounts(ctx context.Context, serverID string, since time.Time, limit int, excludeUASubstrings []string) ([]IPCount, error) {
+//nolint:gosec // G202: same WHERE as GetAccessLogStats (UA exclude + hub path prefix + bound args).
+func (s *Store) GetAccessLogTopIPCounts(ctx context.Context, serverID string, since time.Time, limit int, excludeUASubstrings []string, excludeHubPathPrefix string) ([]IPCount, error) {
 	if limit <= 0 {
 		limit = 15000
 	}
@@ -216,11 +245,14 @@ func (s *Store) GetAccessLogTopIPCounts(ctx context.Context, serverID string, si
 	}
 	sinceStr := since.UTC().Format(time.RFC3339)
 	uaCond, uaArgs := accessUAExcludeSQL(excludeUASubstrings)
-	baseWhere := `server_id = ? AND ts >= ?` + uaCond
+	pathCond, pathArgs := accessLogExcludeHubUIPrefixSQL(excludeHubPathPrefix)
+	baseWhere := `server_id = ? AND ts >= ?` + uaCond + pathCond
+	base := []any{serverID, sinceStr}
+	q := append(append(append([]any{}, base...), uaArgs...), pathArgs...)
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT ip, COUNT(*) as cnt FROM access_logs
 		 WHERE `+baseWhere+` AND ip != '' GROUP BY ip ORDER BY cnt DESC LIMIT ?`,
-		append(append([]any{serverID, sinceStr}, uaArgs...), limit)...,
+		append(q, limit)...,
 	)
 	if err != nil {
 		return nil, err
@@ -239,7 +271,7 @@ func (s *Store) GetAccessLogTopIPCounts(ctx context.Context, serverID string, si
 }
 
 // QueryAccessBadRequests returns recent rows with status_code >= 400, optionally filtered by IP.
-func (s *Store) QueryAccessBadRequests(ctx context.Context, serverID string, since time.Time, ip string, limit int) ([]models.AccessLogEntry, error) {
+func (s *Store) QueryAccessBadRequests(ctx context.Context, serverID string, since time.Time, ip string, limit int, excludeHubPathPrefix string) ([]models.AccessLogEntry, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -247,23 +279,28 @@ func (s *Store) QueryAccessBadRequests(ctx context.Context, serverID string, sin
 		limit = 500
 	}
 	sinceStr := since.UTC().Format(time.RFC3339)
+	pathCond, pathArgs := accessLogExcludeHubUIPrefixSQL(excludeHubPathPrefix)
 	var (
 		rows *sql.Rows
 		err  error
 	)
 	if ip != "" {
+		args := append([]any{serverID, sinceStr, ip}, pathArgs...)
+		args = append(args, limit)
 		rows, err = s.db.QueryContext(ctx,
 			`SELECT server_id, ts, method, path, status_code, duration_ms, ip, user_agent, bytes_sent
-			 FROM access_logs WHERE server_id = ? AND ts >= ? AND status_code >= 400 AND ip = ?
+			 FROM access_logs WHERE server_id = ? AND ts >= ? AND status_code >= 400 AND ip = ?`+pathCond+`
 			 ORDER BY ts DESC LIMIT ?`,
-			serverID, sinceStr, ip, limit,
+			args...,
 		)
 	} else {
+		args := append([]any{serverID, sinceStr}, pathArgs...)
+		args = append(args, limit)
 		rows, err = s.db.QueryContext(ctx,
 			`SELECT server_id, ts, method, path, status_code, duration_ms, ip, user_agent, bytes_sent
-			 FROM access_logs WHERE server_id = ? AND ts >= ? AND status_code >= 400
+			 FROM access_logs WHERE server_id = ? AND ts >= ? AND status_code >= 400`+pathCond+`
 			 ORDER BY ts DESC LIMIT ?`,
-			serverID, sinceStr, limit,
+			args...,
 		)
 	}
 	if err != nil {
@@ -285,11 +322,14 @@ func (s *Store) QueryAccessBadRequests(ctx context.Context, serverID string, sin
 	return result, rows.Err()
 }
 
-func (s *Store) GetRecentAccessLogs(ctx context.Context, serverID string, limit int) ([]models.AccessLogEntry, error) {
+func (s *Store) GetRecentAccessLogs(ctx context.Context, serverID string, limit int, excludeHubPathPrefix string) ([]models.AccessLogEntry, error) {
+	pathCond, pathArgs := accessLogExcludeHubUIPrefixSQL(excludeHubPathPrefix)
+	args := append([]any{serverID}, pathArgs...)
+	args = append(args, limit)
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT server_id, ts, method, path, status_code, duration_ms, ip, user_agent, bytes_sent
-		 FROM access_logs WHERE server_id = ? ORDER BY ts DESC LIMIT ?`,
-		serverID, limit,
+		 FROM access_logs WHERE server_id = ?`+pathCond+` ORDER BY ts DESC LIMIT ?`,
+		args...,
 	)
 	if err != nil {
 		return nil, err

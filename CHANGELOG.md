@@ -4,6 +4,23 @@ All notable changes to TraceLog are documented here. The format is loosely based
 
 ## [Unreleased]
 
+## [v0.2.9] - 2026-03-27
+
+### Added
+
+- **Remote agent log tailing:** `GET /api/agent/log-sources` (authenticate with **`X-API-Key`**). Remote `tracelog agent` polls about every **2 minutes** and tails **file** log sources whose **Settings → Log Sources → agent** matches that server. Paths are **not** validated on the hub for remote rows.
+- **Alert notification history:** each sent email/webhook is stored in **`alert_history`**; **Settings → Alerts → Recent alert notifications** lists the latest rows. API: **`GET /api/alert-history?limit=`** (session auth).
+
+### Changed
+
+- **Log source validation:** local hub sources still require the file on the hub machine; sources bound to another **server_id** skip hub-side path checks.
+- **CI / Makefile:** run **`npm run check`** (Svelte + TypeScript); **Vitest** uses **`--passWithNoTests`** so the suite passes when no frontend tests exist.
+- **UI:** **`contextServerId`** persisted in **sessionStorage**; **`onMount(async …)`** typing fixes in **App** and **Processes**.
+
+### Documentation
+
+- Multi-server, configuration, alerts, and product-scope updated for remote log sources and alert history.
+
 ## [v0.2.8] - 2026-03-27
 
 ### Fixed

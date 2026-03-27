@@ -20,7 +20,7 @@ This page explains how TraceLog handles **application/text logs**, **ingested co
 - **Top paths / top IPs / unique IPs:** Computed for the selected time range.
 - **Top method + path:** Groups `METHOD` + `PATH` for quick insight into hot endpoints.
 - **Bad requests:** Counts of **4xx/5xx** per IP; **Lines** shows recent matching rows. Status **≥ 400** defines “bad” here.
-- **IP blacklist:** One IP or **CIDR** per line. TraceLog **highlights** matching traffic and estimates how many requests came from those IPs (approximation over the busiest distinct IPs). It does **not** block clients — configure **nginx**, **firewall**, or your **CDN** to deny traffic.
+- **IP list (HTTP Analytics panel):** One IP or **CIDR** per line (`#` comments ignored for export). After **Save**, TraceLog **highlights** matching traffic and estimates volume (“Req. from IP list”). This is **analytics only** — it does **not** block clients. To **block**, use **nginx** `deny`, **firewall**, or **CDN**/WAF. The UI offers **Copy nginx deny snippet** / **Download .conf** from the same textarea (you paste into nginx and run `nginx -t` + reload; TraceLog does not change nginx). The feature lives on this page so you can tune the list while viewing **top IPs**; enforcement remains outside TraceLog.
 - **WHOIS links:** Open external sites (e.g. ipwho.is, ipinfo.io); TraceLog does not run WHOIS on the server.
 
 ## API reference (auth required unless noted)

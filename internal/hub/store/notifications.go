@@ -4,10 +4,14 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 
 	"github.com/tudorAbrudan/tracelog/internal/hub/notify"
 )
+
+// ErrNotificationChannelNotFound is returned when UPDATE affects no row.
+var ErrNotificationChannelNotFound = errors.New("notification channel not found")
 
 func (s *Store) ListNotificationChannels(ctx context.Context) ([]notify.Channel, error) {
 	rows, err := s.db.QueryContext(ctx,
@@ -41,6 +45,28 @@ func (s *Store) CreateNotificationChannel(ctx context.Context, ch *notify.Channe
 		ch.ID, ch.Name, ch.Type, ch.Config,
 	)
 	return err
+}
+
+// UpdateNotificationChannel persists name, type, and config for an existing channel (id unchanged).
+func (s *Store) UpdateNotificationChannel(ctx context.Context, ch *notify.Channel) error {
+	if ch.ID == "" {
+		return fmt.Errorf("channel id required")
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE notification_channels SET name = ?, type = ?, config = ? WHERE id = ?`,
+		ch.Name, ch.Type, ch.Config, ch.ID,
+	)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotificationChannelNotFound
+	}
+	return nil
 }
 
 func (s *Store) DeleteNotificationChannel(ctx context.Context, id string) error {

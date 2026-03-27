@@ -37,9 +37,10 @@ func normalizeLogSource(ls *store.LogSourceRecord) {
 	}
 }
 
-// validateLogSourceRecord checks fields before persisting. For type "file", the path must exist
-// on this machine (the hub process). This matches single-node "serve" mode; remote agents are not validated here.
-func validateLogSourceRecord(ls *store.LogSourceRecord) error {
+// validateLogSourceRecord checks fields before persisting. For type "file", when skipHubPathCheck is false,
+// the path must exist on the hub machine. When skipHubPathCheck is true (log source assigned to a remote
+// agent server_id), only syntax is validated — the file must exist on the agent host.
+func validateLogSourceRecord(ls *store.LogSourceRecord, skipHubPathCheck bool) error {
 	if ls.Name == "" {
 		return errors.New("name is required")
 	}
@@ -52,6 +53,12 @@ func validateLogSourceRecord(ls *store.LogSourceRecord) error {
 	if ls.Path == "" {
 		return errors.New("path is required for file log sources")
 	}
+	if !allowedLogFormats[ls.Format] {
+		return fmt.Errorf("unsupported format %q (allowed: plain, nginx, apache)", ls.Format)
+	}
+	if skipHubPathCheck {
+		return nil
+	}
 	info, err := os.Stat(ls.Path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -61,9 +68,6 @@ func validateLogSourceRecord(ls *store.LogSourceRecord) error {
 	}
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("path must be a regular file: %s", ls.Path)
-	}
-	if !allowedLogFormats[ls.Format] {
-		return fmt.Errorf("unsupported format %q (allowed: plain, nginx, apache)", ls.Format)
 	}
 	if err := validateFileMatchesFormat(ls.Path, ls.Format); err != nil {
 		return err
