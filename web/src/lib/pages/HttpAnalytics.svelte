@@ -145,11 +145,20 @@
     return map;
   })();
 
-  function scoredIP(ipStat: any): { score: number; badges: string[] } {
+  // Build a lookup map: ip → bad_count from bad_requests_by_ip
+  $: badCountByIP = (() => {
+    const m: Record<string, number> = {};
+    for (const b of (stats?.bad_requests_by_ip ?? [])) m[b.ip] = b.bad_count;
+    return m;
+  })();
+
+  function scoredIP(ipStat: any): { score: number; badges: string[]; errRate: number; errCount: number } {
     let score = 0;
     const badges: string[] = [];
 
-    const errRate = ipStat.count > 0 ? (ipStat.error_count ?? 0) / ipStat.count : 0;
+    // Use bad_requests_by_ip for accurate error count (top_ips.error_count field not present)
+    const errCount = badCountByIP[ipStat.ip] ?? 0;
+    const errRate = ipStat.count > 0 ? errCount / ipStat.count : 0;
     if (errRate > 0.8) score += 4;
     else if (errRate > 0.5) score += 2;
 
@@ -170,12 +179,34 @@
       score += 2; badges.push('SUBNET');
     }
 
-    return { score, badges };
+    return { score, badges, errRate, errCount };
   }
 
   $: scoredIPs = (stats?.top_ips ?? [])
     .map((ip: any) => ({ ...ip, ...scoredIP(ip) }))
     .sort((a: any, b: any) => b.score - a.score);
+
+  $: recommendedToBlock = (scoredIPs as any[]).filter(
+    (r) => r.score >= 3 && !isBlacklistedIP(r.ip),
+  );
+
+  function addToBlacklist(ip: string) {
+    const lines = blacklistText.trim() ? blacklistText.trim().split('\n').map((s: string) => s.trim()) : [];
+    if (!lines.includes(ip)) {
+      blacklistText = [...lines, ip].join('\n');
+      blacklistDirty = true;
+    }
+  }
+
+  function addAllRecommended() {
+    const existing = new Set(
+      blacklistText.trim().split('\n').map((s: string) => s.trim()).filter(Boolean),
+    );
+    const toAdd = (recommendedToBlock as any[]).map((r) => r.ip).filter((ip: string) => !existing.has(ip));
+    if (!toAdd.length) return;
+    blacklistText = [...existing, ...toAdd].join('\n');
+    blacklistDirty = true;
+  }
 
   // Rebuild chart when tab or data changes
   $: if (activeTab === 'overview' && timeline && chartEl) {
@@ -556,6 +587,65 @@
 
       <!-- Tab: Clients -->
       {#if activeTab === 'clients'}
+        {#if recommendedToBlock.length > 0}
+          <div class="recommend-box">
+            <div class="recommend-header">
+              <div>
+                <h3 class="recommend-title">Recommended to block &mdash; {recommendedToBlock.length} IP{recommendedToBlock.length === 1 ? '' : 's'}</h3>
+                <p class="section-lead">Automatic detection based on error rate, scanner paths, bot User-Agents, and subnet clustering. Review before blocking &mdash; legitimate services (monitoring, CDN) can score high with many requests.</p>
+              </div>
+              {#if recommendedToBlock.length > 1}
+                <button type="button" class="btn-add-all" on:click={addAllRecommended}>Add all to IP list</button>
+              {/if}
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>IP</th>
+                  <th class="num">Requests</th>
+                  <th class="num">Errors</th>
+                  <th class="num">Err%</th>
+                  <th>Threat</th>
+                  <th>Why</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each recommendedToBlock as row}
+                  <tr>
+                    <td class="mono">{row.ip}</td>
+                    <td class="num">{row.count}</td>
+                    <td class="num">{row.errCount}</td>
+                    <td class="num">{row.count > 0 ? (row.errRate * 100).toFixed(0) : 0}%</td>
+                    <td>
+                      {#if row.score >= 6}
+                        <span class="badge-threat">THREAT</span>
+                      {:else}
+                        <span class="badge-suspicious">SUSPICIOUS</span>
+                      {/if}
+                    </td>
+                    <td>
+                      {#each row.badges as badge}
+                        {#if badge === 'SCANNER'}
+                          <span class="badge-scanner">{badge}</span>
+                        {:else if badge === 'BOT'}
+                          <span class="badge-bot">{badge}</span>
+                        {:else if badge === 'SUBNET'}
+                          <span class="badge-subnet">{badge}</span>
+                        {/if}
+                      {/each}
+                    </td>
+                    <td>
+                      <button type="button" class="btn-add-one" on:click={() => addToBlacklist(row.ip)}>Add to list</button>
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+            <p class="recommend-note">Adding to list only highlights in analytics. Use <strong>Save list</strong> below, then export to nginx / firewall to actually block.</p>
+          </div>
+        {/if}
+
         <div class="table-section" style="margin-bottom: 0.75rem">
           <h3>Top client IPs</h3>
           <p class="section-lead">Ranking by total requests with automatic threat scoring. Up to 50 rows.</p>
@@ -580,11 +670,9 @@
                     {row.ip}
                   </td>
                   <td class="num">{row.count}</td>
-                  <td class="num">{row.error_count ?? 0}</td>
-                  <td class="num">
-                    {row.count > 0 ? (((row.error_count ?? 0) / row.count) * 100).toFixed(0) : 0}%
-                  </td>
-                  <td class="num">{fmtBytes(row.bytes ?? 0)}</td>
+                  <td class="num">{row.errCount}</td>
+                  <td class="num">{row.count > 0 ? (row.errRate * 100).toFixed(0) : 0}%</td>
+                  <td class="num">{fmtBytes(row.bytes_sent ?? 0)}</td>
                   <td>
                     {#if row.score >= 6}
                       <span class="badge-threat">THREAT</span>
@@ -760,7 +848,7 @@
               <table>
                 <thead>
                   <tr>
-                    <th class="num">Ms</th>
+                    <th class="num">Duration</th>
                     <th>Time</th>
                     <th>Method</th>
                     <th>Path</th>
@@ -772,7 +860,7 @@
                 <tbody>
                   {#each slowLogs as log}
                     <tr>
-                      <td class="num slow-ms">{Math.round(Number(log.duration_ms) || 0)}</td>
+                      <td class="num slow-ms">{Math.round(Number(log.duration_ms) || 0)} ms</td>
                       <td class="mono">{new Date(log.ts).toLocaleString()}</td>
                       <td><span class="method">{log.method}</span></td>
                       <td class="path">{log.path}</td>
@@ -947,12 +1035,39 @@
   }
   .ip-cell { vertical-align: middle; }
 
+  /* Slow requests duration */
+  .slow-ms { color: #f0883e; font-weight: 700; }
+
   /* Threat badges */
   .badge-threat { background: #f8514922; color: #f85149; padding: 2px 6px; border-radius: 4px; font-size: 0.68rem; font-weight: 700; }
   .badge-suspicious { background: #d2992222; color: #d29922; padding: 2px 6px; border-radius: 4px; font-size: 0.68rem; font-weight: 700; }
   .badge-scanner { background: #f0883e22; color: #f0883e; padding: 2px 6px; border-radius: 4px; font-size: 0.68rem; }
   .badge-bot { background: #bc8cff22; color: #bc8cff; padding: 2px 6px; border-radius: 4px; font-size: 0.68rem; }
   .badge-subnet { background: #58a6ff22; color: #58a6ff; padding: 2px 6px; border-radius: 4px; font-size: 0.68rem; }
+
+  /* Recommended to block panel */
+  .recommend-box {
+    background: #f8514908; border: 1px solid #f8514944;
+    border-radius: 10px; padding: 0.85rem 1rem; margin-bottom: 0.75rem;
+  }
+  .recommend-header {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    gap: 0.75rem; margin-bottom: 0.5rem; flex-wrap: wrap;
+  }
+  .recommend-title { margin: 0 0 0.15rem; font-size: 0.88rem; color: #f85149; }
+  .recommend-note { font-size: 0.72rem; color: var(--text-muted); margin: 0.5rem 0 0; line-height: 1.4; }
+  .btn-add-all {
+    padding: 0.35rem 0.85rem; font-size: 0.78rem; font-weight: 600;
+    border-radius: 7px; cursor: pointer; white-space: nowrap;
+    border: 1px solid #f85149; background: #f8514911; color: #f85149;
+  }
+  .btn-add-all:hover { background: #f8514922; }
+  .btn-add-one {
+    padding: 0.2rem 0.55rem; font-size: 0.72rem; font-weight: 600;
+    border-radius: 5px; cursor: pointer; white-space: nowrap;
+    border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-primary);
+  }
+  .btn-add-one:hover { border-color: var(--accent); color: var(--accent); }
 
   /* Policy / blacklist box */
   .policy-box {

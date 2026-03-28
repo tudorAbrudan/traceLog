@@ -4,6 +4,18 @@ All notable changes to TraceLog are documented here. The format is loosely based
 
 ## [Unreleased]
 
+## [v0.2.17] - 2026-03-28
+
+### Fixed
+
+- **HTTP Analytics — threat scoring not firing:** `top_ips` does not carry `error_count`; `scoredIP` now cross-references `bad_requests_by_ip` for accurate per-IP error count. Badges (THREAT/SUSPICIOUS/SCANNER/BOT/SUBNET) now appear immediately on first page load without requiring a blacklist save.
+- **HTTP Analytics — Slow requests duration invisible:** renamed column header from "Ms" to "Duration", appended `ms` unit to value, added orange bold styling (`.slow-ms`).
+- **HTTP Analytics — Bytes sent column:** fixed field reference from `row.bytes` to `row.bytes_sent`.
+
+### Added
+
+- **HTTP Analytics — "Recommended to block" panel:** appears at the top of the Clients tab when any IP scores ≥ 3. Shows IP, request count, error count, error %, threat level, and reason badges. One-click **Add to list** per IP; **Add all to IP list** button when multiple IPs qualify. Adds to the textarea (still requires **Save list** + nginx export to actually block).
+
 ## [v0.2.16] - 2026-03-28
 
 ### Added
