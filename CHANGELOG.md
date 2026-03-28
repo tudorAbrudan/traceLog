@@ -4,6 +4,21 @@ All notable changes to TraceLog are documented here. The format is loosely based
 
 ## [Unreleased]
 
+## [v0.2.16] - 2026-03-28
+
+### Added
+
+- **HTTP Analytics — 4-tab layout:** **Overview** (summary stats + traffic timeline chart), **Paths** (top paths by volume + by avg duration), **Clients** (IP threat scoring + blacklist), **Requests** (bad, slow, recent).
+- **HTTP Analytics — traffic timeline chart:** uPlot area chart of requests over time; bucket size adapts to the selected range (5 min for 1H → 1 day for 30D). Requires new `GET /api/servers/{id}/access-timeline` endpoint.
+- **HTTP Analytics — automatic threat/scanner detection:** per-IP threat score computed from error rate, scanner path hits (`.env`, `wp-admin`, `/etc/passwd`, etc.), known bot User-Agents (`nuclei`, `zgrab`, `masscan`, …), and `/24` subnet clustering. Badges: **THREAT** (score ≥ 6), **SUSPICIOUS** (3–5), **SCANNER**, **BOT**, **SUBNET**.
+- **HTTP Analytics — top paths by avg duration:** `top_paths_by_duration` added to `access-stats` response (min 3 requests, sorted slowest-first).
+- **HTTP Analytics — bytes sent per IP:** `bytes_sent` column added to top-IPs stats.
+- **Logs — Level and Source dropdowns:** column filters for Level and Source are now dropdowns populated from distinct values present in the loaded logs (levels sorted by severity, sources alphabetically). Selection resets automatically on server change.
+
+### Changed
+
+- **HTTP Analytics — IP blacklist** moved to bottom of the Clients tab.
+
 ## [v0.2.15] - 2026-03-27
 
 ### Fixed

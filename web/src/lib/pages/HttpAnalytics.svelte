@@ -1,14 +1,19 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { get } from 'svelte/store';
+  import uPlot from 'uplot';
+  import 'uplot/dist/uPlot.min.css';
   import { api } from '../api';
   import { contextServerId } from '../store';
+  import { fmtBytes } from '../utils/format';
   import LoadingState from '../components/LoadingState.svelte';
 
+  // --- State ---
   let servers: any[] = [];
   let selectedServer = '';
   let range_ = '24h';
   let stats: any = null;
+  let timeline: { points: Array<{ ts: string; count: number }>; bucket_minutes: number } | null = null;
   let recentLogs: any[] = [];
   let loading = true;
   let loadError = '';
@@ -19,10 +24,11 @@
   let badLogs: any[] = [];
   let badLoading = false;
   let badFilterIP = '';
-  /** Ingested access log rows with duration >= threshold (ms). */
   let slowLogs: any[] = [];
   let slowLoading = false;
   let slowMinMs = 500;
+
+  let activeTab: 'overview' | 'paths' | 'clients' | 'requests' = 'overview';
 
   const ranges = [
     { value: '1h', label: '1H' },
@@ -32,6 +38,151 @@
     { value: '30d', label: '30D' },
   ];
 
+  // --- Timeline chart ---
+  let chartEl: HTMLDivElement | undefined;
+  let uplot: uPlot | null = null;
+  let chartPending: ReturnType<typeof setTimeout> | null = null;
+
+  function buildTimelineChart() {
+    if (chartPending) { clearTimeout(chartPending); chartPending = null; }
+    if (uplot) { uplot.destroy(); uplot = null; }
+    if (!chartEl || !timeline?.points?.length) return;
+
+    const w = chartEl.clientWidth;
+    if (w < 50) {
+      chartPending = setTimeout(buildTimelineChart, 100);
+      return;
+    }
+
+    const xs = timeline.points.map((p) => new Date(p.ts).getTime() / 1000);
+    const ys = timeline.points.map((p) => p.count);
+
+    uplot = new uPlot(
+      {
+        width: w,
+        height: 140,
+        padding: [8, 8, 0, 0],
+        series: [
+          {},
+          {
+            label: 'Requests',
+            stroke: '#58a6ff',
+            fill: '#58a6ff22',
+            width: 1.5,
+            points: { show: false },
+          },
+        ],
+        axes: [
+          {
+            stroke: '#8b949e88',
+            ticks: { stroke: '#8b949e22', width: 1 },
+            grid: { stroke: '#8b949e11', width: 1 },
+            font: '10px system-ui, sans-serif',
+            gap: 4,
+            size: 36,
+          },
+          {
+            stroke: '#8b949e88',
+            ticks: { stroke: '#8b949e22', width: 1 },
+            grid: { stroke: '#8b949e15', width: 1 },
+            font: '10px system-ui, sans-serif',
+            gap: 4,
+            size: 50,
+          },
+        ],
+        cursor: { show: true, x: true, y: false },
+        legend: { show: false },
+        scales: { x: { time: true } },
+      },
+      [xs, ys],
+      chartEl,
+    );
+  }
+
+  function scheduleBuildChart() {
+    if (chartPending) clearTimeout(chartPending);
+    chartPending = setTimeout(() => {
+      chartPending = null;
+      buildTimelineChart();
+    }, 50);
+  }
+
+  let chartResizeObs: ResizeObserver | null = null;
+
+  // --- Threat scoring ---
+  const SCANNER_PATHS = [
+    '/wp-admin', '/wp-login', '/xmlrpc.php', '/wp-content', '/wp-includes',
+    '/.env', '/.git/', '/.htaccess', '/.svn/',
+    '/config.php', '/configuration.php', '/settings.php',
+    '/phpmyadmin', '/pma/', '/admin/login',
+    '/setup.php', '/install.php', '/installer.php',
+    '/actuator/', '/api/swagger', '/swagger-ui',
+    '/cgi-bin/', '/shell', '/webshell',
+    '/etc/passwd', '/etc/shadow',
+    '../', '%2e%2e', '..%2f',
+    '/composer.json', '/package.json', '/.DS_Store',
+    '/db.sql', '/backup.sql', '/database.sql',
+  ];
+
+  const SCANNER_UAS = [
+    'zgrab', 'masscan', 'nuclei', 'nikto', 'sqlmap',
+    'dirbuster', 'gobuster', 'wfuzz', 'ffuf',
+    'libwww-perl', 'python-requests', 'python-urllib',
+    'go-http-client',
+  ];
+
+  function getSubnet24(ip: string): string {
+    const parts = ip.split('.');
+    return parts.length === 4 ? parts.slice(0, 3).join('.') : '';
+  }
+
+  $: subnetCounts = (() => {
+    const map: Record<string, number> = {};
+    for (const ip of (stats?.top_ips ?? [])) {
+      const s = getSubnet24(ip.ip);
+      if (s) map[s] = (map[s] || 0) + 1;
+    }
+    return map;
+  })();
+
+  function scoredIP(ipStat: any): { score: number; badges: string[] } {
+    let score = 0;
+    const badges: string[] = [];
+
+    const errRate = ipStat.count > 0 ? (ipStat.error_count ?? 0) / ipStat.count : 0;
+    if (errRate > 0.8) score += 4;
+    else if (errRate > 0.5) score += 2;
+
+    const ipReqs = [...recentLogs, ...badLogs].filter((r) => r.ip === ipStat.ip);
+
+    const hasScannerPath = ipReqs.some(
+      (r) => r.path && SCANNER_PATHS.some((p) => r.path.toLowerCase().includes(p)),
+    );
+    if (hasScannerPath) { score += 4; badges.push('SCANNER'); }
+
+    const hasBotUA = ipReqs.some(
+      (r) => r.user_agent && SCANNER_UAS.some((ua) => r.user_agent.toLowerCase().includes(ua)),
+    );
+    if (hasBotUA) { score += 3; badges.push('BOT'); }
+
+    const subnet = getSubnet24(ipStat.ip);
+    if (subnet && (subnetCounts[subnet] ?? 0) >= 2) {
+      score += 2; badges.push('SUBNET');
+    }
+
+    return { score, badges };
+  }
+
+  $: scoredIPs = (stats?.top_ips ?? [])
+    .map((ip: any) => ({ ...ip, ...scoredIP(ip) }))
+    .sort((a: any, b: any) => b.score - a.score);
+
+  // Rebuild chart when tab or data changes
+  $: if (activeTab === 'overview' && timeline && chartEl) {
+    scheduleBuildChart();
+  }
+
+  // --- Helpers ---
   function whoisHref(ip: string): string {
     return `https://ipwho.is/${encodeURIComponent(ip)}`;
   }
@@ -42,118 +193,6 @@
 
   function isBlacklistedIP(ip: string): boolean {
     return !!(stats?.blacklisted_in_top && stats.blacklisted_in_top.includes(ip));
-  }
-
-  onMount(() => {
-    let interval: ReturnType<typeof setInterval> | undefined;
-    void (async () => {
-      try {
-        servers = (await api.listServers()) ?? [];
-        if (servers.length > 0) {
-          const ctx = get(contextServerId);
-          if (ctx && servers.some((s) => s.id === ctx)) {
-            selectedServer = ctx;
-          } else {
-            selectedServer = servers[0].id;
-          }
-          await loadData();
-        }
-      } catch (e) {
-        loadError = (e as Error).message || 'Failed to load';
-      } finally {
-        loading = false;
-      }
-      interval = setInterval(loadData, 30000);
-    })();
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  });
-
-  async function loadData() {
-    if (!selectedServer) return;
-    try {
-      const [st, recent, policy] = await Promise.all([
-        api.getAccessStats(selectedServer, range_, 50),
-        api.getRecentAccessLogs(selectedServer),
-        api.getAccessIPPolicy().catch(() => ({ ips: [] as string[] })),
-      ]);
-      stats = st;
-      recentLogs = recent;
-      const ips = (policy && policy.ips) || [];
-      if (!blacklistDirty) {
-        blacklistText = ips.join('\n');
-      }
-      await refreshBadRequests();
-      await refreshSlowRequests();
-    } catch (e) {
-      loadError = (e as Error).message || 'Failed to load analytics';
-    }
-  }
-
-  async function saveBlacklist() {
-    savingBl = true;
-    try {
-      const ips = blacklistText
-        .split('\n')
-        .map((s) => s.trim())
-        .filter(Boolean);
-      await api.putAccessIPPolicy(ips);
-      blacklistDirty = false;
-      await loadData();
-    } catch (e: any) {
-      saveError = e.message || 'Save failed';
-    } finally {
-      savingBl = false;
-    }
-  }
-
-  async function refreshBadRequests() {
-    if (!selectedServer) return;
-    badLoading = true;
-    try {
-      badLogs = (await api.getAccessBadRequests(selectedServer, {
-        range: range_,
-        ip: badFilterIP.trim() || undefined,
-        limit: 200,
-      })) ?? [];
-    } catch {
-      badLogs = [];
-    } finally {
-      badLoading = false;
-    }
-  }
-
-  async function refreshSlowRequests() {
-    if (!selectedServer) return;
-    slowLoading = true;
-    try {
-      const min = Math.max(1, Math.min(3_600_000, Number(slowMinMs) || 500));
-      slowLogs = (await api.getAccessSlowRequests(selectedServer, {
-        range: range_,
-        min_ms: min,
-        limit: 200,
-      })) ?? [];
-    } catch {
-      slowLogs = [];
-    } finally {
-      slowLoading = false;
-    }
-  }
-
-  function selectRange(r: string) {
-    range_ = r;
-    loadData();
-  }
-
-  function showBadForIP(ip: string) {
-    badFilterIP = ip;
-    refreshBadRequests();
-  }
-
-  function clearBadIPFilter() {
-    badFilterIP = '';
-    refreshBadRequests();
   }
 
   /** Non-empty, non-comment lines (same rules as save). */
@@ -211,9 +250,152 @@
     if (code >= 300) return 'status-3xx';
     return 'status-2xx';
   }
+
+  // --- Data loading ---
+  async function refreshBadRequests() {
+    if (!selectedServer) return;
+    badLoading = true;
+    try {
+      badLogs = (await api.getAccessBadRequests(selectedServer, {
+        range: range_,
+        ip: badFilterIP.trim() || undefined,
+        limit: 200,
+      })) ?? [];
+    } catch {
+      badLogs = [];
+    } finally {
+      badLoading = false;
+    }
+  }
+
+  async function refreshSlowRequests() {
+    if (!selectedServer) return;
+    slowLoading = true;
+    try {
+      const min = Math.max(1, Math.min(3_600_000, Number(slowMinMs) || 500));
+      slowLogs = (await api.getAccessSlowRequests(selectedServer, {
+        range: range_,
+        min_ms: min,
+        limit: 200,
+      })) ?? [];
+    } catch {
+      slowLogs = [];
+    } finally {
+      slowLoading = false;
+    }
+  }
+
+  async function loadData() {
+    if (!selectedServer) return;
+    loadError = '';
+    try {
+      const [st, tl, recent, policy] = await Promise.all([
+        api.getAccessStats(selectedServer, range_, 50),
+        api.getAccessTimeline(selectedServer, range_).catch(() => null),
+        api.getRecentAccessLogs(selectedServer),
+        api.getAccessIPPolicy().catch(() => ({ ips: [] as string[] })),
+      ]);
+      stats = st;
+      timeline = tl as typeof timeline;
+      recentLogs = recent ?? [];
+      const ips = (policy && policy.ips) || [];
+      if (!blacklistDirty) {
+        blacklistText = ips.join('\n');
+      }
+      await refreshBadRequests();
+      await refreshSlowRequests();
+    } catch (e) {
+      loadError = (e as Error).message || 'Failed to load analytics';
+    }
+  }
+
+  async function saveBlacklist() {
+    savingBl = true;
+    saveError = '';
+    try {
+      const ips = blacklistText
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      await api.putAccessIPPolicy(ips);
+      blacklistDirty = false;
+      await loadData();
+    } catch (e: any) {
+      saveError = e.message || 'Save failed';
+    } finally {
+      savingBl = false;
+    }
+  }
+
+  function selectRange(r: string) {
+    range_ = r;
+    void loadData();
+  }
+
+  function showBadForIP(ip: string) {
+    badFilterIP = ip;
+    activeTab = 'requests';
+    void refreshBadRequests();
+  }
+
+  function clearBadIPFilter() {
+    badFilterIP = '';
+    void refreshBadRequests();
+  }
+
+  onMount(() => {
+    let interval: ReturnType<typeof setInterval> | undefined;
+    void (async () => {
+      try {
+        servers = (await api.listServers()) ?? [];
+        if (servers.length > 0) {
+          const ctx = get(contextServerId);
+          if (ctx && servers.some((s) => s.id === ctx)) {
+            selectedServer = ctx;
+          } else {
+            selectedServer = servers[0].id;
+          }
+          await loadData();
+        }
+      } catch (e) {
+        loadError = (e as Error).message || 'Failed to load';
+      } finally {
+        loading = false;
+      }
+      interval = setInterval(() => { void loadData(); }, 30000);
+    })();
+
+    chartResizeObs = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const w = Math.floor(entry.contentRect.width);
+        if (w < 50) continue;
+        if (uplot) {
+          uplot.setSize({ width: w, height: 140 });
+        } else if (timeline?.points?.length) {
+          scheduleBuildChart();
+        }
+      }
+    });
+
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  });
+
+  onDestroy(() => {
+    if (chartPending) clearTimeout(chartPending);
+    chartResizeObs?.disconnect();
+    if (uplot) { uplot.destroy(); uplot = null; }
+  });
+
+  // Attach resize observer once chartEl is bound and we switch to overview
+  $: if (chartEl && chartResizeObs) {
+    chartResizeObs.observe(chartEl);
+  }
 </script>
 
 <div class="analytics">
+  <!-- Top controls: always visible -->
   <div class="header">
     <h2>HTTP Analytics</h2>
     <div class="controls">
@@ -223,7 +405,7 @@
           on:change={() => {
             contextServerId.set(selectedServer);
             blacklistDirty = false;
-            loadData();
+            void loadData();
           }}
         >
           {#each servers as s}
@@ -241,255 +423,376 @@
 
   <LoadingState {loading} error={loadError}>
     {#if !stats || stats.total_requests === 0}
-    <div class="status-msg">
-      No HTTP request data in this range. Add your nginx (or apache) <strong>access</strong> log under Settings → Log Sources with format <strong>nginx</strong> (or apache), then <strong>restart TraceLog</strong> so the agent tails the file. Only requests logged <em>after</em> the restart are ingested; try hitting your site to generate new lines.
-    </div>
-  {:else}
-    <div class="page-intro">
-      <strong>IP rankings</strong> are on this page (sidebar: <strong>HTTP Analytics</strong>). Use the time range above.
-      <ul>
-        <li><strong>Top client IPs</strong> — clients ranked by <em>total</em> request count (table below, up to 50 rows). <strong>Unique IPs</strong> in the summary is how many distinct addresses appear in the range.</li>
-        <li><strong>Top IPs by error responses</strong> — clients ranked by how many <strong>4xx / 5xx</strong> responses they received (separate table). Use <strong>Lines</strong> to see sample failing requests for one IP.</li>
-        <li>
-          <strong>Self-traffic</strong> — rankings can ignore chosen <strong>User-Agent</strong> substrings (e.g. TraceLog’s uptime client) under <strong>Settings → General</strong>, so tables reflect your app’s visitors rather than monitoring probes.
-        </li>
-        <li>
-          <strong>Slow requests</strong> — lists ingested access lines whose <strong>request time</strong> (ms from the log) is at least your threshold; sorted slowest first. Requires your access log format to include duration (nginx/apache combined format).
-        </li>
-      </ul>
-    </div>
-    <div class="stats-grid">
-      <div class="stat-card">
-        <span class="stat-value">{stats.total_requests.toLocaleString()}</span>
-        <span class="stat-label">Total Requests</span>
+      <div class="status-msg">
+        No HTTP request data in this range. Add your nginx (or apache) <strong>access</strong> log under Settings &rarr; Log Sources with format <strong>nginx</strong> (or apache), then <strong>restart TraceLog</strong> so the agent tails the file. Only requests logged <em>after</em> the restart are ingested; try hitting your site to generate new lines.
       </div>
-      <div class="stat-card">
-        <span class="stat-value">{stats.unique_ip_count?.toLocaleString?.() ?? '—'}</span>
-        <span class="stat-label">Unique IPs</span>
+    {:else}
+      <!-- Tab bar -->
+      <div class="tabs">
+        <button type="button" class="tab-btn" class:active={activeTab === 'overview'} on:click={() => (activeTab = 'overview')}>Overview</button>
+        <button type="button" class="tab-btn" class:active={activeTab === 'paths'} on:click={() => (activeTab = 'paths')}>Paths</button>
+        <button type="button" class="tab-btn" class:active={activeTab === 'clients'} on:click={() => (activeTab = 'clients')}>Clients</button>
+        <button type="button" class="tab-btn" class:active={activeTab === 'requests'} on:click={() => (activeTab = 'requests')}>Requests</button>
       </div>
-      <div class="stat-card">
-        <span class="stat-value" class:danger={stats.error_rate > 5}>{stats.error_rate.toFixed(1)}%</span>
-        <span class="stat-label">Error rate (4xx/5xx)</span>
-      </div>
-      <div class="stat-card">
-        <span class="stat-value">{stats.avg_duration_ms.toFixed(0)}ms</span>
-        <span class="stat-label">Avg response time</span>
-      </div>
-      <div class="stat-card">
-        <span class="stat-value" class:danger={stats.blacklisted_hits > 0}>{stats.blacklisted_hits?.toLocaleString?.() ?? 0}</span>
-        <span class="stat-label">Req. from IP list (est., analytics only)</span>
-        {#if stats.blacklist_hits_note}
-          <span class="stat-sublabel">{stats.blacklist_hits_note}</span>
-        {/if}
-      </div>
-      <div class="stat-card wide">
-        <div class="status-breakdown">
-          {#each Object.entries(stats.status_codes || {}) as [code, count]}
-            <span class="status-chip {code.startsWith('2') ? 'ok' : code.startsWith('4') ? 'warn' : code.startsWith('5') ? 'err' : ''}">
-              {code}: {count}
-            </span>
-          {/each}
+
+      <!-- Tab: Overview -->
+      {#if activeTab === 'overview'}
+        <div class="page-intro">
+          <strong>IP rankings</strong> are on this page (sidebar: <strong>HTTP Analytics</strong>). Use the time range above.
+          <ul>
+            <li><strong>Top client IPs</strong> — clients ranked by <em>total</em> request count (Clients tab, up to 50 rows). <strong>Unique IPs</strong> in the summary is how many distinct addresses appear in the range.</li>
+            <li><strong>Top IPs by error responses</strong> — clients ranked by how many <strong>4xx / 5xx</strong> responses they received. Use <strong>Lines</strong> to see sample failing requests for one IP.</li>
+            <li>
+              <strong>Self-traffic</strong> — rankings can ignore chosen <strong>User-Agent</strong> substrings (e.g. TraceLog's uptime client) under <strong>Settings &rarr; General</strong>, so tables reflect your app's visitors rather than monitoring probes.
+            </li>
+            <li>
+              <strong>Slow requests</strong> — lists ingested access lines whose <strong>request time</strong> (ms from the log) is at least your threshold; sorted slowest first. Requires your access log format to include duration.
+            </li>
+          </ul>
         </div>
-        <span class="stat-label">Status codes</span>
-      </div>
-    </div>
 
-    <div class="policy-box">
-      <h3>IP list — analytics &amp; nginx export</h3>
-      <p class="policy-hint">
-        <strong>What TraceLog does with this list</strong> (after you click <em>Save</em>): it stores the lines in the hub database
-        and uses them only inside <strong>HTTP Analytics</strong> — to <strong>highlight</strong> matching client IPs in the tables
-        and to show the <strong>“Req. from blacklist (est.)”</strong> counter. Data is whatever was already ingested from your access
-        logs; nothing is changed on disk and <strong>no requests are refused</strong> by TraceLog.
-      </p>
-      <ul class="policy-list">
-        <li>
-          <strong>Not a firewall:</strong> visitors can still reach your site (e.g. <code>https://cadourile.ro/</code>). To actually
-          <strong>block</strong> addresses, configure <strong>nginx</strong> <code>deny</code>, a <strong>firewall</strong>, or your
-          <strong>CDN</strong> / WAF.
-        </li>
-        <li>
-          <strong>Export for nginx:</strong> use the buttons below to generate <code>deny …;</code> lines from the textarea (saved or
-          not). You edit and reload nginx yourself — TraceLog does not modify the server.
-        </li>
-        <li>
-          <strong>Why this lives on HTTP Analytics:</strong> the list is meant to be tuned while you look at <strong>top IPs</strong> and
-          error traffic on the same page; blocking itself always happens outside TraceLog.
-        </li>
-      </ul>
-      <p class="policy-hint policy-format">
-        Format: one IP or CIDR per line (e.g. <code>203.0.113.50</code> or <code>10.0.0.0/8</code>). Lines starting with
-        <code>#</code> are ignored for export.
-        <a class="doc-ref" href="https://tudorAbrudan.github.io/traceLog/guide/logs-http-analytics" target="_blank" rel="noopener noreferrer">Docs</a>
-      </p>
-      <textarea
-        class="policy-ta"
-        bind:value={blacklistText}
-        on:input={() => (blacklistDirty = true)}
-        rows="4"
-        placeholder="10.0.0.0/8&#10;192.0.2.1"
-        aria-label="IP list for analytics and nginx export"
-      ></textarea>
-      <div class="policy-actions">
-        <button type="button" class="btn-save-bl" disabled={savingBl} on:click={saveBlacklist}>{savingBl ? 'Saving…' : 'Save list'}</button>
-        <button type="button" class="btn-export-bl" on:click={copyNginxDenySnippet}>Copy nginx deny snippet</button>
-        <button type="button" class="btn-export-bl" on:click={downloadNginxDenySnippet}>Download .conf</button>
-      </div>
-      {#if saveError}<p class="error-msg">{saveError}</p>{/if}
-    </div>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <span class="stat-value">{stats.total_requests.toLocaleString()}</span>
+            <span class="stat-label">Total Requests</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value">{stats.unique_ip_count?.toLocaleString?.() ?? '—'}</span>
+            <span class="stat-label">Unique IPs</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value" class:danger={stats.error_rate > 5}>{stats.error_rate.toFixed(1)}%</span>
+            <span class="stat-label">Error rate (4xx/5xx)</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value">{stats.avg_duration_ms.toFixed(0)}ms</span>
+            <span class="stat-label">Avg response time</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value" class:danger={stats.blacklisted_hits > 0}>{stats.blacklisted_hits?.toLocaleString?.() ?? 0}</span>
+            <span class="stat-label">Req. from IP list (est., analytics only)</span>
+            {#if stats.blacklist_hits_note}
+              <span class="stat-sublabel">{stats.blacklist_hits_note}</span>
+            {/if}
+          </div>
+          <div class="stat-card wide">
+            <div class="status-breakdown">
+              {#each Object.entries(stats.status_codes || {}) as [code, count]}
+                <span class="status-chip {code.startsWith('2') ? 'ok' : code.startsWith('4') ? 'warn' : code.startsWith('5') ? 'err' : ''}">
+                  {code}: {count}
+                </span>
+              {/each}
+            </div>
+            <span class="stat-label">Status codes</span>
+          </div>
+        </div>
 
-    <div class="tables-row three">
-      <div class="table-section">
-        <h3>Top URL paths</h3>
-        <p class="section-lead">Most requested paths in this range.</p>
-        <table>
-          <thead><tr><th>Path</th><th class="num">Count</th></tr></thead>
-          <tbody>
-            {#each stats.top_paths || [] as p}
-              <tr><td class="path">{p.path}</td><td class="num">{p.count}</td></tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
+        <!-- Traffic timeline chart -->
+        <div class="timeline-chart-wrap table-section">
+          <h3 class="section-label">Traffic over time</h3>
+          {#if !timeline?.points?.length}
+            <div class="muted">No timeline data available for this range.</div>
+          {:else}
+            <div class="timeline-chart" bind:this={chartEl}></div>
+          {/if}
+        </div>
+      {/if}
 
-      <div class="table-section">
-        <h3>Top method + path</h3>
-        <p class="section-lead">Combined HTTP method and path by volume.</p>
-        <table>
-          <thead><tr><th>Method</th><th>Path</th><th class="num">Count</th></tr></thead>
-          <tbody>
-            {#each stats.top_method_paths || [] as r}
-              <tr>
-                <td><span class="method">{r.method}</span></td>
-                <td class="path">{r.path}</td>
-                <td class="num">{r.count}</td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
+      <!-- Tab: Paths -->
+      {#if activeTab === 'paths'}
+        <div class="two-col">
+          <div class="table-section">
+            <h3>Top URL paths</h3>
+            <p class="section-lead">Most requested paths in this range.</p>
+            <table>
+              <thead><tr><th>Path</th><th class="num">Count</th></tr></thead>
+              <tbody>
+                {#each stats.top_paths || [] as p}
+                  <tr><td class="path">{p.path}</td><td class="num">{p.count}</td></tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
 
-      <div class="table-section">
-        <h3>Top client IPs</h3>
-        <p class="section-lead">Ranking by total requests (success and error). Up to 50 rows.</p>
-        <table>
-          <thead><tr><th>IP address</th><th class="num">Requests</th><th>Lookup</th></tr></thead>
-          <tbody>
-            {#each stats.top_ips || [] as row}
-              <tr class:bl-row={isBlacklistedIP(row.ip)}>
-                <td class="mono ip-cell">
-                  {#if isBlacklistedIP(row.ip)}<span class="bl-badge">list</span>{/if}
-                  {row.ip}
-                </td>
-                <td class="num">{row.count}</td>
-                <td class="lookup">
-                  <a href={whoisHref(row.ip)} target="_blank" rel="noopener noreferrer">WHOIS</a>
-                  <span class="sep">·</span>
-                  <a href={ipinfoHref(row.ip)} target="_blank" rel="noopener noreferrer">ipinfo</a>
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
-    </div>
+          <div class="table-section">
+            <h3>Top paths by avg duration</h3>
+            <p class="section-lead">Paths ranked by mean response time (ms).</p>
+            {#if !(stats.top_paths_by_duration ?? []).length}
+              <div class="muted">No duration data available (requires access log format with timing).</div>
+            {:else}
+              <table>
+                <thead><tr><th>Path</th><th class="num">Avg ms</th><th class="num">Count</th></tr></thead>
+                <tbody>
+                  {#each stats.top_paths_by_duration ?? [] as p}
+                    <tr>
+                      <td class="path">{p.path}</td>
+                      <td class="num slow-ms">{Math.round(p.avg_duration_ms ?? 0)}</td>
+                      <td class="num">{p.count}</td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            {/if}
+          </div>
+        </div>
 
-    <div class="slow-section">
-      <h3>Slow requests</h3>
-      <p class="policy-hint">
-        Rows where <strong>duration</strong> from the access log is at least the threshold (same time range as above). Sorted by <strong>slowest first</strong>. Uses the same User-Agent exclusions as top tables when configured under <strong>Settings → General</strong>.
-      </p>
-      <div class="slow-toolbar">
-        <label class="slow-min-label"
-          >Min duration (ms)
-          <input
-            type="number"
-            class="slow-min-input"
-            bind:value={slowMinMs}
-            min="1"
-            max="3600000"
-            step="1"
-          /></label
-        >
-        <button type="button" class="btn-secondary" on:click={refreshSlowRequests} disabled={slowLoading}>
-          {slowLoading ? 'Loading…' : 'Refresh'}
-        </button>
-      </div>
-      {#if slowLoading && slowLogs.length === 0}
-        <div class="muted">Loading…</div>
-      {:else if slowLogs.length === 0}
-        <div class="muted">No requests at or above this threshold in the range (or duration not present in logs).</div>
-      {:else}
-        <div class="recent-table slow-table-wrap">
+        <div class="table-section" style="margin-top: 0.75rem">
+          <h3>Top method + path</h3>
+          <p class="section-lead">Combined HTTP method and path by volume.</p>
           <table>
-            <thead>
-              <tr>
-                <th class="num">Ms</th>
-                <th>Time</th>
-                <th>Method</th>
-                <th>Path</th>
-                <th class="num">Status</th>
-                <th>IP</th>
-                <th>User-Agent</th>
-              </tr>
-            </thead>
+            <thead><tr><th>Method</th><th>Path</th><th class="num">Count</th></tr></thead>
             <tbody>
-              {#each slowLogs as log}
+              {#each stats.top_method_paths || [] as r}
                 <tr>
-                  <td class="num slow-ms">{Math.round(Number(log.duration_ms) || 0)}</td>
-                  <td class="mono">{new Date(log.ts).toLocaleString()}</td>
-                  <td><span class="method">{log.method}</span></td>
-                  <td class="path">{log.path}</td>
-                  <td class="num {statusClass(log.status_code)}">{log.status_code}</td>
-                  <td class="mono">
-                    {log.ip}
-                    <a href={whoisHref(log.ip)} target="_blank" rel="noopener noreferrer" class="mini-whois">↗</a>
-                  </td>
-                  <td class="ua-cell" title={log.user_agent || ''}>{log.user_agent || '—'}</td>
+                  <td><span class="method">{r.method}</span></td>
+                  <td class="path">{r.path}</td>
+                  <td class="num">{r.count}</td>
                 </tr>
               {/each}
             </tbody>
           </table>
         </div>
       {/if}
-    </div>
 
-    <div class="bad-section">
-      <h3>Top IPs by error responses (4xx / 5xx)</h3>
-      <p class="policy-hint">
-        Ranking by number of <strong>client or server error</strong> responses per IP in the selected range (up to 50 IPs).
-        Use <strong>Lines</strong> to load recent failing requests for that address. <strong>Show all bad requests</strong> lists samples from every IP.
-      </p>
-      <div class="bad-toolbar">
-        {#if badFilterIP}
-          <span class="bad-filter">Filter: <code>{badFilterIP}</code></span>
-          <button type="button" class="btn-clear" on:click={clearBadIPFilter}>Show all bad requests</button>
-        {/if}
-        <button type="button" class="btn-secondary" on:click={refreshBadRequests} disabled={badLoading}>Refresh list</button>
-      </div>
-      <div class="bad-tables">
-        <table class="bad-by-ip">
-          <thead><tr><th>IP address</th><th class="num">4xx/5xx count</th><th></th></tr></thead>
-          <tbody>
-            {#each stats.bad_requests_by_ip || [] as row}
-              <tr class:bl-row={isBlacklistedIP(row.ip)}>
-                <td class="mono">{row.ip}</td>
-                <td class="num">{row.bad_count}</td>
-                <td>
-                  <button type="button" class="linkish" on:click={() => showBadForIP(row.ip)}>Lines</button>
-                  <a href={whoisHref(row.ip)} target="_blank" rel="noopener noreferrer" class="linkish">WHOIS</a>
-                </td>
+      <!-- Tab: Clients -->
+      {#if activeTab === 'clients'}
+        <div class="table-section" style="margin-bottom: 0.75rem">
+          <h3>Top client IPs</h3>
+          <p class="section-lead">Ranking by total requests with automatic threat scoring. Up to 50 rows.</p>
+          <table>
+            <thead>
+              <tr>
+                <th>IP address</th>
+                <th class="num">Requests</th>
+                <th class="num">Errors</th>
+                <th class="num">Err%</th>
+                <th class="num">Bytes</th>
+                <th>Threat</th>
+                <th>Badges</th>
+                <th>Links</th>
               </tr>
-            {/each}
-          </tbody>
-        </table>
-        <div class="bad-lines-wrap">
-          <h4>Sample error request lines {#if badFilterIP}for {badFilterIP}{/if}</h4>
-          {#if badLoading}
-            <div class="muted">Loading…</div>
-          {:else if badLogs.length === 0}
-            <div class="muted">No rows. Pick an IP above or clear the filter.</div>
+            </thead>
+            <tbody>
+              {#each scoredIPs as row}
+                <tr class:bl-row={isBlacklistedIP(row.ip)}>
+                  <td class="mono ip-cell">
+                    {#if isBlacklistedIP(row.ip)}<span class="bl-badge">list</span>{/if}
+                    {row.ip}
+                  </td>
+                  <td class="num">{row.count}</td>
+                  <td class="num">{row.error_count ?? 0}</td>
+                  <td class="num">
+                    {row.count > 0 ? (((row.error_count ?? 0) / row.count) * 100).toFixed(0) : 0}%
+                  </td>
+                  <td class="num">{fmtBytes(row.bytes ?? 0)}</td>
+                  <td>
+                    {#if row.score >= 6}
+                      <span class="badge-threat">THREAT</span>
+                    {:else if row.score >= 3}
+                      <span class="badge-suspicious">SUSPICIOUS</span>
+                    {/if}
+                  </td>
+                  <td>
+                    {#each row.badges as badge}
+                      {#if badge === 'SCANNER'}
+                        <span class="badge-scanner">{badge}</span>
+                      {:else if badge === 'BOT'}
+                        <span class="badge-bot">{badge}</span>
+                      {:else if badge === 'SUBNET'}
+                        <span class="badge-subnet">{badge}</span>
+                      {/if}
+                    {/each}
+                  </td>
+                  <td class="lookup">
+                    <a href={whoisHref(row.ip)} target="_blank" rel="noopener noreferrer">WHOIS</a>
+                    <span class="sep">&middot;</span>
+                    <a href={ipinfoHref(row.ip)} target="_blank" rel="noopener noreferrer">ipinfo</a>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+
+        <!-- IP Blacklist section -->
+        <div class="policy-box">
+          <h3>IP list &mdash; analytics &amp; nginx export</h3>
+          <p class="policy-hint">
+            <strong>What TraceLog does with this list</strong> (after you click <em>Save</em>): it stores the lines in the hub database
+            and uses them only inside <strong>HTTP Analytics</strong> &mdash; to <strong>highlight</strong> matching client IPs in the tables
+            and to show the <strong>"Req. from blacklist (est.)"</strong> counter. Data is whatever was already ingested from your access
+            logs; nothing is changed on disk and <strong>no requests are refused</strong> by TraceLog.
+          </p>
+          <ul class="policy-list">
+            <li>
+              <strong>Not a firewall:</strong> visitors can still reach your site. To actually
+              <strong>block</strong> addresses, configure <strong>nginx</strong> <code>deny</code>, a <strong>firewall</strong>, or your
+              <strong>CDN</strong> / WAF.
+            </li>
+            <li>
+              <strong>Export for nginx:</strong> use the buttons below to generate <code>deny &hellip;;</code> lines from the textarea (saved or
+              not). You edit and reload nginx yourself &mdash; TraceLog does not modify the server.
+            </li>
+            <li>
+              <strong>Why this lives on HTTP Analytics:</strong> the list is meant to be tuned while you look at <strong>top IPs</strong> and
+              error traffic on the same page; blocking itself always happens outside TraceLog.
+            </li>
+          </ul>
+          <p class="policy-hint policy-format">
+            Format: one IP or CIDR per line (e.g. <code>203.0.113.50</code> or <code>10.0.0.0/8</code>). Lines starting with
+            <code>#</code> are ignored for export.
+            <a class="doc-ref" href="https://tudorAbrudan.github.io/traceLog/guide/logs-http-analytics" target="_blank" rel="noopener noreferrer">Docs</a>
+          </p>
+          <textarea
+            class="policy-ta"
+            bind:value={blacklistText}
+            on:input={() => (blacklistDirty = true)}
+            rows="4"
+            placeholder="10.0.0.0/8&#10;192.0.2.1"
+            aria-label="IP list for analytics and nginx export"
+          ></textarea>
+          <div class="policy-actions">
+            <button type="button" class="btn-save-bl" disabled={savingBl} on:click={saveBlacklist}>{savingBl ? 'Saving...' : 'Save list'}</button>
+            <button type="button" class="btn-export-bl" on:click={copyNginxDenySnippet}>Copy nginx deny snippet</button>
+            <button type="button" class="btn-export-bl" on:click={downloadNginxDenySnippet}>Download .conf</button>
+          </div>
+          {#if saveError}<p class="error-msg">{saveError}</p>{/if}
+        </div>
+      {/if}
+
+      <!-- Tab: Requests -->
+      {#if activeTab === 'requests'}
+        <div class="bad-section">
+          <h3>Top IPs by error responses (4xx / 5xx)</h3>
+          <p class="policy-hint">
+            Ranking by number of <strong>client or server error</strong> responses per IP in the selected range (up to 50 IPs).
+            Use <strong>Lines</strong> to load recent failing requests for that address. <strong>Show all bad requests</strong> lists samples from every IP.
+          </p>
+          <div class="bad-toolbar">
+            {#if badFilterIP}
+              <span class="bad-filter">Filter: <code>{badFilterIP}</code></span>
+              <button type="button" class="btn-clear" on:click={clearBadIPFilter}>Show all bad requests</button>
+            {/if}
+            <button type="button" class="btn-secondary" on:click={refreshBadRequests} disabled={badLoading}>Refresh list</button>
+          </div>
+          <div class="bad-tables">
+            <table class="bad-by-ip">
+              <thead><tr><th>IP address</th><th class="num">4xx/5xx count</th><th></th></tr></thead>
+              <tbody>
+                {#each stats.bad_requests_by_ip || [] as row}
+                  <tr class:bl-row={isBlacklistedIP(row.ip)}>
+                    <td class="mono">{row.ip}</td>
+                    <td class="num">{row.bad_count}</td>
+                    <td>
+                      <button type="button" class="linkish" on:click={() => showBadForIP(row.ip)}>Lines</button>
+                      <a href={whoisHref(row.ip)} target="_blank" rel="noopener noreferrer" class="linkish">WHOIS</a>
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+            <div class="bad-lines-wrap">
+              <h4>Sample error request lines {#if badFilterIP}for {badFilterIP}{/if}</h4>
+              {#if badLoading}
+                <div class="muted">Loading...</div>
+              {:else if badLogs.length === 0}
+                <div class="muted">No rows. Pick an IP above or clear the filter.</div>
+              {:else}
+                <div class="recent-table">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Time</th>
+                        <th>Method</th>
+                        <th>Path</th>
+                        <th class="num">Status</th>
+                        <th>IP</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {#each badLogs as log}
+                        <tr>
+                          <td class="mono">{new Date(log.ts).toLocaleString()}</td>
+                          <td><span class="method">{log.method}</span></td>
+                          <td class="path">{log.path}</td>
+                          <td class="num {statusClass(log.status_code)}">{log.status_code}</td>
+                          <td class="mono">
+                            {log.ip}
+                            <a href={whoisHref(log.ip)} target="_blank" rel="noopener noreferrer" class="mini-whois">&#8599;</a>
+                          </td>
+                        </tr>
+                      {/each}
+                    </tbody>
+                  </table>
+                </div>
+              {/if}
+            </div>
+          </div>
+        </div>
+
+        <div class="slow-section">
+          <h3>Slow requests</h3>
+          <p class="policy-hint">
+            Rows where <strong>duration</strong> from the access log is at least the threshold (same time range as above). Sorted by <strong>slowest first</strong>. Uses the same User-Agent exclusions as top tables when configured under <strong>Settings &rarr; General</strong>.
+          </p>
+          <div class="slow-toolbar">
+            <label class="slow-min-label">
+              Min duration (ms)
+              <input
+                type="number"
+                class="slow-min-input"
+                bind:value={slowMinMs}
+                min="1"
+                max="3600000"
+                step="1"
+              />
+            </label>
+            <button type="button" class="btn-secondary" on:click={refreshSlowRequests} disabled={slowLoading}>
+              {slowLoading ? 'Loading...' : 'Refresh'}
+            </button>
+          </div>
+          {#if slowLoading && slowLogs.length === 0}
+            <div class="muted">Loading...</div>
+          {:else if slowLogs.length === 0}
+            <div class="muted">No requests at or above this threshold in the range (or duration not present in logs).</div>
           {:else}
+            <div class="recent-table slow-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th class="num">Ms</th>
+                    <th>Time</th>
+                    <th>Method</th>
+                    <th>Path</th>
+                    <th class="num">Status</th>
+                    <th>IP</th>
+                    <th>User-Agent</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each slowLogs as log}
+                    <tr>
+                      <td class="num slow-ms">{Math.round(Number(log.duration_ms) || 0)}</td>
+                      <td class="mono">{new Date(log.ts).toLocaleString()}</td>
+                      <td><span class="method">{log.method}</span></td>
+                      <td class="path">{log.path}</td>
+                      <td class="num {statusClass(log.status_code)}">{log.status_code}</td>
+                      <td class="mono">
+                        {log.ip}
+                        <a href={whoisHref(log.ip)} target="_blank" rel="noopener noreferrer" class="mini-whois">&#8599;</a>
+                      </td>
+                      <td class="ua-cell" title={log.user_agent || ''}>{log.user_agent || '—'}</td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+          {/if}
+        </div>
+
+        {#if recentLogs.length > 0}
+          <div class="recent-section">
+            <h3>Recent requests (all statuses)</h3>
             <div class="recent-table">
               <table>
                 <thead>
@@ -502,71 +805,41 @@
                   </tr>
                 </thead>
                 <tbody>
-                  {#each badLogs as log}
+                  {#each recentLogs.slice(0, 50) as log}
                     <tr>
-                      <td class="mono">{new Date(log.ts).toLocaleString()}</td>
+                      <td class="mono">{new Date(log.ts).toLocaleTimeString()}</td>
                       <td><span class="method">{log.method}</span></td>
                       <td class="path">{log.path}</td>
                       <td class="num {statusClass(log.status_code)}">{log.status_code}</td>
                       <td class="mono">
                         {log.ip}
-                        <a href={whoisHref(log.ip)} target="_blank" rel="noopener noreferrer" class="mini-whois">↗</a>
+                        <a href={whoisHref(log.ip)} target="_blank" rel="noopener noreferrer" class="mini-whois" title="WHOIS">&#8599;</a>
                       </td>
                     </tr>
                   {/each}
                 </tbody>
               </table>
             </div>
-          {/if}
-        </div>
-      </div>
-    </div>
-
-    {#if recentLogs.length > 0}
-      <div class="recent-section">
-        <h3>Recent requests (all statuses)</h3>
-        <div class="recent-table">
-          <table>
-            <thead>
-              <tr>
-                <th>Time</th>
-                <th>Method</th>
-                <th>Path</th>
-                <th class="num">Status</th>
-                <th>IP</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each recentLogs.slice(0, 50) as log}
-                <tr>
-                  <td class="mono">{new Date(log.ts).toLocaleTimeString()}</td>
-                  <td><span class="method">{log.method}</span></td>
-                  <td class="path">{log.path}</td>
-                  <td class="num {statusClass(log.status_code)}">{log.status_code}</td>
-                  <td class="mono">
-                    {log.ip}
-                    <a href={whoisHref(log.ip)} target="_blank" rel="noopener noreferrer" class="mini-whois" title="WHOIS">↗</a>
-                  </td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
-      </div>
+          </div>
+        {/if}
+      {/if}
     {/if}
-  {/if}
   </LoadingState>
 </div>
 
 <style>
   .analytics { padding: 1.5rem; max-width: none; }
+
   .page-intro {
     font-size: 0.82rem; color: var(--text-secondary); line-height: 1.5; margin-bottom: 1rem;
     padding: 0.75rem 1rem; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 10px;
   }
   .page-intro ul { margin: 0.4rem 0 0 0; padding-left: 1.2rem; }
   .page-intro li { margin-bottom: 0.25rem; }
+
   .section-lead { font-size: 0.72rem; color: var(--text-muted); margin: -0.25rem 0 0.5rem 0; line-height: 1.35; }
+  .section-label { font-size: 0.85rem; color: var(--text-secondary); margin: 0 0 0.5rem; }
+
   .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem; }
   h2 { margin: 0; font-size: 1.3rem; color: var(--text-primary); }
   h3 { font-size: 0.85rem; color: var(--text-secondary); margin: 0 0 0.5rem; }
@@ -590,6 +863,17 @@
   .range-bar button:hover { color: var(--text-primary); }
   .range-bar button.active { background: var(--accent); color: #fff; }
 
+  /* Tabs */
+  .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 1.25rem; }
+  .tab-btn {
+    background: none; border: none; padding: 0.5rem 1rem; cursor: pointer;
+    font-size: 0.82rem; font-weight: 500; color: var(--text-muted);
+    border-bottom: 2px solid transparent; margin-bottom: -1px;
+  }
+  .tab-btn:hover { color: var(--text-primary); }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+
+  /* Stats */
   .stats-grid {
     display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
     gap: 0.75rem; margin-bottom: 1rem;
@@ -615,6 +899,62 @@
   .status-chip.warn { background: #d2992222; color: var(--warning); }
   .status-chip.err { background: #f8514922; color: var(--danger); }
 
+  /* Timeline chart */
+  .timeline-chart-wrap { margin: 0 0 1rem; }
+  .timeline-chart { width: 100%; min-height: 140px; }
+
+  /* Two-col layout */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+  @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
+
+  /* Table sections */
+  .table-section {
+    background: var(--bg-secondary); border: 1px solid var(--border);
+    border-radius: 10px; padding: 0.75rem; min-width: 0; overflow-x: auto;
+    margin-bottom: 0.75rem;
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+  th {
+    text-align: left; padding: 0.4rem 0.5rem; color: var(--text-muted);
+    font-size: 0.72rem; font-weight: 600; border-bottom: 1px solid var(--border);
+  }
+  th.num, td.num { text-align: right; }
+  td { padding: 0.35rem 0.5rem; color: var(--text-secondary); border-bottom: 1px solid var(--border); }
+  td.mono { font-variant-numeric: tabular-nums; font-size: 0.75rem; }
+  td.path {
+    max-width: 72rem; white-space: normal; word-break: break-word;
+    font-size: 0.78rem; line-height: 1.35;
+  }
+  tr:last-child td { border-bottom: none; }
+  tr.bl-row { background: rgba(248, 81, 73, 0.06); }
+
+  .method {
+    padding: 1px 5px; border-radius: 3px; font-size: 0.7rem;
+    background: var(--bg-hover); color: var(--accent); font-weight: 600;
+  }
+  .status-2xx { color: var(--success); }
+  .status-3xx { color: var(--accent); }
+  .status-4xx { color: var(--warning); }
+  .status-5xx { color: var(--danger); font-weight: 600; }
+
+  .lookup { font-size: 0.72rem; white-space: nowrap; }
+  .lookup a { color: var(--accent); }
+  .sep { color: var(--text-muted); margin: 0 0.15rem; }
+  .bl-badge {
+    display: inline-block; font-size: 0.6rem; font-weight: 700; text-transform: uppercase;
+    padding: 1px 4px; border-radius: 3px; background: #f8514933; color: #f85149; margin-right: 4px;
+  }
+  .ip-cell { vertical-align: middle; }
+
+  /* Threat badges */
+  .badge-threat { background: #f8514922; color: #f85149; padding: 2px 6px; border-radius: 4px; font-size: 0.68rem; font-weight: 700; }
+  .badge-suspicious { background: #d2992222; color: #d29922; padding: 2px 6px; border-radius: 4px; font-size: 0.68rem; font-weight: 700; }
+  .badge-scanner { background: #f0883e22; color: #f0883e; padding: 2px 6px; border-radius: 4px; font-size: 0.68rem; }
+  .badge-bot { background: #bc8cff22; color: #bc8cff; padding: 2px 6px; border-radius: 4px; font-size: 0.68rem; }
+  .badge-subnet { background: #58a6ff22; color: #58a6ff; padding: 2px 6px; border-radius: 4px; font-size: 0.68rem; }
+
+  /* Policy / blacklist box */
   .policy-box {
     background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 10px;
     padding: 0.85rem 1rem; margin-bottom: 1rem;
@@ -646,99 +986,10 @@
   }
   .btn-export-bl:hover { border-color: var(--accent); color: var(--accent); }
 
-  .tables-row {
-    display: grid; gap: 0.75rem; margin-bottom: 1.25rem;
-  }
-  .tables-row.three {
-    grid-template-columns: 1fr;
-    max-width: 1200px;
-  }
-  .table-section {
-    background: var(--bg-secondary); border: 1px solid var(--border);
-    border-radius: 10px; padding: 0.75rem; min-width: 0;
-    overflow-x: auto;
-  }
-
-  table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
-  th {
-    text-align: left; padding: 0.4rem 0.5rem; color: var(--text-muted);
-    font-size: 0.72rem; font-weight: 600; border-bottom: 1px solid var(--border);
-  }
-  th.num, td.num { text-align: right; }
-  td { padding: 0.35rem 0.5rem; color: var(--text-secondary); border-bottom: 1px solid var(--border); }
-  td.mono { font-variant-numeric: tabular-nums; font-size: 0.75rem; }
-  td.path {
-    max-width: 72rem;
-    white-space: normal;
-    word-break: break-word;
-    font-size: 0.78rem;
-    line-height: 1.35;
-  }
-  tr:last-child td { border-bottom: none; }
-  tr.bl-row { background: rgba(248, 81, 73, 0.06); }
-
-  .method {
-    padding: 1px 5px; border-radius: 3px; font-size: 0.7rem;
-    background: var(--bg-hover); color: var(--accent); font-weight: 600;
-  }
-  .status-2xx { color: var(--success); }
-  .status-3xx { color: var(--accent); }
-  .status-4xx { color: var(--warning); }
-  .status-5xx { color: var(--danger); font-weight: 600; }
-
-  .lookup { font-size: 0.72rem; white-space: nowrap; }
-  .lookup a { color: var(--accent); }
-  .sep { color: var(--text-muted); margin: 0 0.15rem; }
-  .bl-badge {
-    display: inline-block; font-size: 0.6rem; font-weight: 700; text-transform: uppercase;
-    padding: 1px 4px; border-radius: 3px; background: #f8514933; color: #f85149; margin-right: 4px;
-  }
-  .ip-cell { vertical-align: middle; }
-
-  .slow-section {
-    margin-bottom: 1.25rem;
-    padding: 0.85rem 1rem 1rem;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-  }
-  .slow-toolbar {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-end;
-    gap: 0.65rem;
-    margin-bottom: 0.65rem;
-  }
-  .slow-min-label {
-    font-size: 0.78rem;
-    color: var(--text-secondary);
-    display: flex;
-    flex-direction: column;
-    gap: 0.2rem;
-  }
-  .slow-min-input {
-    width: 7rem;
-    padding: 0.35rem 0.45rem;
-    background: var(--bg-primary);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    color: var(--text-primary);
-    font-size: 0.85rem;
-  }
-  .slow-ms { font-weight: 600; color: var(--accent); }
-  .slow-table-wrap { overflow-x: auto; }
-  .ua-cell {
-    max-width: 220px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 0.72rem;
-    color: var(--text-muted);
-  }
-
+  /* Bad requests */
   .bad-section {
     background: var(--bg-secondary); border: 1px solid var(--border);
-    border-radius: 10px; padding: 0.85rem; margin-bottom: 1.25rem;
+    border-radius: 10px; padding: 0.85rem; margin-bottom: 0.75rem;
   }
   .bad-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.65rem; }
   .bad-filter { font-size: 0.78rem; color: var(--text-secondary); }
@@ -762,6 +1013,31 @@
   .bad-lines-wrap { min-width: 0; }
   .muted { font-size: 0.8rem; color: var(--text-muted); padding: 0.5rem 0; }
 
+  /* Slow requests */
+  .slow-section {
+    margin-bottom: 0.75rem; padding: 0.85rem 1rem 1rem;
+    background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 10px;
+  }
+  .slow-toolbar {
+    display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.65rem; margin-bottom: 0.65rem;
+  }
+  .slow-min-label {
+    font-size: 0.78rem; color: var(--text-secondary);
+    display: flex; flex-direction: column; gap: 0.2rem;
+  }
+  .slow-min-input {
+    width: 7rem; padding: 0.35rem 0.45rem;
+    background: var(--bg-primary); border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text-primary); font-size: 0.85rem;
+  }
+  .slow-ms { font-weight: 600; color: var(--accent); }
+  .slow-table-wrap { overflow-x: auto; }
+  .ua-cell {
+    max-width: 220px; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; font-size: 0.72rem; color: var(--text-muted);
+  }
+
+  /* Recent requests */
   .recent-section {
     background: var(--bg-secondary); border: 1px solid var(--border);
     border-radius: 10px; padding: 0.75rem;

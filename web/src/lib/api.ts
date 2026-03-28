@@ -192,6 +192,8 @@ export const api = {
   },
   getAccessIPPolicy: () => request('GET', '/access-ip-policy'),
   putAccessIPPolicy: (ips: string[]) => request('PUT', '/access-ip-policy', { ips }),
+  getAccessTimeline: (serverId: string, range: string) =>
+    request('GET', `/servers/${encodeURIComponent(serverId)}/access-timeline?range=${encodeURIComponent(range)}`),
 
   // Detection
   detect: () => request('GET', '/detect'),

@@ -38,6 +38,11 @@
   let colFilterSource = '';
   let colFilterMessage = '';
 
+  $: uniqueLevels = [...new Set(logs.map((l: any) => l.level).filter(Boolean))].sort(
+    (a, b) => (levelRank[a] ?? 99) - (levelRank[b] ?? 99),
+  );
+  $: uniqueSources = [...new Set(logs.map((l: any) => l.source).filter(Boolean))].sort();
+
   const levelRank: Record<string, number> = {
     critical: 0,
     error: 1,
@@ -97,6 +102,11 @@
 
       const result = await api.getLogs(selectedServer, q);
       logs = result || [];
+      // Reset column filters if their value no longer exists in the new data
+      const lvlSet = new Set(logs.map((l: any) => l.level).filter(Boolean));
+      const srcSet = new Set(logs.map((l: any) => l.source).filter(Boolean));
+      if (colFilterLevel && !lvlSet.has(colFilterLevel)) colFilterLevel = '';
+      if (colFilterSource && !srcSet.has(colFilterSource)) colFilterSource = '';
     } catch (e) {
       loadError = (e as Error).message || 'Failed to fetch logs';
       logs = [];
@@ -375,22 +385,28 @@
               />
             </div>
             <div class="col-level">
-              <input
-                class="col-filter"
-                type="search"
-                placeholder="Filter…"
+              <select
+                class="col-filter col-filter-select"
                 bind:value={colFilterLevel}
                 aria-label="Filter by level"
-              />
+              >
+                <option value="">All</option>
+                {#each uniqueLevels as lvl}
+                  <option value={lvl}>{lvl}</option>
+                {/each}
+              </select>
             </div>
             <div class="col-source">
-              <input
-                class="col-filter"
-                type="search"
-                placeholder="Filter…"
+              <select
+                class="col-filter col-filter-select"
                 bind:value={colFilterSource}
                 aria-label="Filter by source"
-              />
+              >
+                <option value="">All</option>
+                {#each uniqueSources as src}
+                  <option value={src}>{src}</option>
+                {/each}
+              </select>
             </div>
             <div class="col-msg">
               <input
@@ -508,6 +524,7 @@
   }
   .col-filter:focus { outline: none; border-color: #58a6ff; }
   .col-filter::placeholder { color: var(--text-muted); opacity: 0.8; }
+  .col-filter-select { cursor: pointer; }
   .log-row {
     display: flex; gap: 0.75rem; padding: 0.35rem 1rem; border-bottom: 1px solid var(--border);
     color: var(--text-primary); transition: background 0.1s;

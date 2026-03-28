@@ -9,6 +9,16 @@ import (
 	"github.com/tudorAbrudan/tracelog/internal/models"
 )
 
+type AccessTimelinePoint struct {
+	Ts    time.Time `json:"ts"`
+	Count int       `json:"count"`
+}
+
+type AccessTimeline struct {
+	Points        []AccessTimelinePoint `json:"points"`
+	BucketMinutes int                   `json:"bucket_minutes"`
+}
+
 // accessLogExcludeHubUIPrefixSQL drops rows whose path is under the hub’s public URL prefix (same as --url-prefix / TRACELOG_URL_PREFIX).
 // normalizedPrefix is the hub’s public path (from --url-prefix / TRACELOG_URL_PREFIX), e.g. "/monitor"; "" = no filter (hub at site root).
 func accessLogExcludeHubUIPrefixSQL(normalizedPrefix string) (cond string, args []any) {
@@ -66,19 +76,26 @@ func (s *Store) InsertAccessLog(ctx context.Context, entry *models.AccessLogEntr
 }
 
 type AccessLogStats struct {
-	TotalRequests   int               `json:"total_requests"`
-	StatusCodes     map[string]int    `json:"status_codes"`
-	TopPaths        []PathCount       `json:"top_paths"`
-	TopIPs          []IPCount         `json:"top_ips"`
-	UniqueIPCount   int               `json:"unique_ip_count"`
-	TopMethodPaths  []MethodPathCount `json:"top_method_paths"`
-	BadRequestsByIP []IPBadCount      `json:"bad_requests_by_ip"`
-	ErrorRate       float64           `json:"error_rate"`
-	AvgDuration     float64           `json:"avg_duration_ms"`
+	TotalRequests      int                `json:"total_requests"`
+	StatusCodes        map[string]int     `json:"status_codes"`
+	TopPaths           []PathCount        `json:"top_paths"`
+	TopIPs             []IPCount          `json:"top_ips"`
+	UniqueIPCount      int                `json:"unique_ip_count"`
+	TopMethodPaths     []MethodPathCount  `json:"top_method_paths"`
+	BadRequestsByIP    []IPBadCount       `json:"bad_requests_by_ip"`
+	ErrorRate          float64            `json:"error_rate"`
+	AvgDuration        float64            `json:"avg_duration_ms"`
+	TopPathsByDuration []PathDurationStat `json:"top_paths_by_duration"`
 	// Filled by hub after store (blacklist matching), not by GetAccessLogStats.
 	BlacklistedHits   int      `json:"blacklisted_hits"`
 	BlacklistHitsNote string   `json:"blacklist_hits_note,omitempty"`
 	BlacklistedInTop  []string `json:"blacklisted_in_top,omitempty"` // IPs in top tables that match policy
+}
+
+type PathDurationStat struct {
+	Path  string  `json:"path"`
+	AvgMs float64 `json:"avg_ms"`
+	Count int     `json:"count"`
 }
 
 type PathCount struct {
@@ -87,8 +104,9 @@ type PathCount struct {
 }
 
 type IPCount struct {
-	IP    string `json:"ip"`
-	Count int    `json:"count"`
+	IP        string `json:"ip"`
+	Count     int    `json:"count"`
+	BytesSent int64  `json:"bytes_sent"`
 }
 
 type MethodPathCount struct {
@@ -178,7 +196,7 @@ func (s *Store) GetAccessLogStats(ctx context.Context, serverID string, since ti
 	}
 
 	rows, err = s.db.QueryContext(ctx,
-		`SELECT ip, COUNT(*) as cnt FROM access_logs
+		`SELECT ip, COUNT(*) as cnt, COALESCE(SUM(bytes_sent), 0) AS bytes_sent FROM access_logs
 		 WHERE `+baseWhere+` AND ip != '' GROUP BY ip ORDER BY cnt DESC LIMIT ?`,
 		append(qArgs, topN)...,
 	)
@@ -186,7 +204,7 @@ func (s *Store) GetAccessLogStats(ctx context.Context, serverID string, since ti
 		defer rows.Close()
 		for rows.Next() {
 			var ic IPCount
-			if err := rows.Scan(&ic.IP, &ic.Count); err != nil {
+			if err := rows.Scan(&ic.IP, &ic.Count, &ic.BytesSent); err != nil {
 				return nil, err
 			}
 			stats.TopIPs = append(stats.TopIPs, ic)
@@ -227,6 +245,27 @@ func (s *Store) GetAccessLogStats(ctx context.Context, serverID string, since ti
 				return nil, err
 			}
 			stats.BadRequestsByIP = append(stats.BadRequestsByIP, ib)
+		}
+	}
+
+	rows, err = s.db.QueryContext(ctx,
+		`SELECT path, AVG(duration_ms) AS avg_ms, COUNT(*) AS cnt
+		 FROM access_logs
+		 WHERE `+baseWhere+` AND path != '' AND duration_ms > 0
+		 GROUP BY path
+		 HAVING cnt >= 3
+		 ORDER BY avg_ms DESC
+		 LIMIT ?`,
+		append(qArgs, topN)...,
+	)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var pd PathDurationStat
+			if err := rows.Scan(&pd.Path, &pd.AvgMs, &pd.Count); err != nil {
+				return nil, err
+			}
+			stats.TopPathsByDuration = append(stats.TopPathsByDuration, pd)
 		}
 	}
 
@@ -401,4 +440,77 @@ func (s *Store) GetRecentAccessLogs(ctx context.Context, serverID string, limit 
 		result = append(result, e)
 	}
 	return result, nil
+}
+
+// GetAccessTimeline returns request counts bucketed by time for chart rendering.
+// bucketSec is an integer computed from a fixed switch — not user input.
+//
+//nolint:gosec // G202: bucketSec is an integer computed from a fixed switch, not user input; other conditions use bound args only.
+func (s *Store) GetAccessTimeline(ctx context.Context, serverID, since, hubPathPrefix string) (*AccessTimeline, error) {
+	bucketMin := 60
+	switch since {
+	case "1h":
+		bucketMin = 5
+	case "6h":
+		bucketMin = 15
+	case "24h":
+		bucketMin = 60
+	case "7d":
+		bucketMin = 360
+	case "30d":
+		bucketMin = 1440
+	}
+	bucketSec := bucketMin * 60
+
+	var rangeStart time.Time
+	switch since {
+	case "1h":
+		rangeStart = time.Now().Add(-1 * time.Hour)
+	case "6h":
+		rangeStart = time.Now().Add(-6 * time.Hour)
+	case "7d":
+		rangeStart = time.Now().Add(-7 * 24 * time.Hour)
+	case "30d":
+		rangeStart = time.Now().Add(-30 * 24 * time.Hour)
+	default: // "24h" and any unrecognised value
+		rangeStart = time.Now().Add(-24 * time.Hour)
+	}
+
+	hubPathExclude := ""
+	if hubPathPrefix != "" {
+		hubPathExclude = hubPathPrefix
+	}
+
+	// bucketSec is an integer from a fixed switch — safe to interpolate; remaining args are bound parameters.
+	rows, err := s.db.QueryContext(ctx, `
+        SELECT
+            (CAST(strftime('%s', ts) AS INTEGER) / ?) * ? AS bucket_ts,
+            COUNT(*) AS cnt
+        FROM access_logs
+        WHERE server_id = ? AND ts >= ?
+          AND NOT INSTR(path, ?)
+        GROUP BY bucket_ts
+        ORDER BY bucket_ts ASC
+    `, bucketSec, bucketSec, serverID, rangeStart.UTC().Format(time.RFC3339), hubPathExclude)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var points []AccessTimelinePoint
+	for rows.Next() {
+		var bucketTs int64
+		var cnt int
+		if err := rows.Scan(&bucketTs, &cnt); err != nil {
+			return nil, err
+		}
+		points = append(points, AccessTimelinePoint{
+			Ts:    time.Unix(bucketTs, 0).UTC(),
+			Count: cnt,
+		})
+	}
+	if points == nil {
+		points = []AccessTimelinePoint{}
+	}
+	return &AccessTimeline{Points: points, BucketMinutes: bucketMin}, nil
 }

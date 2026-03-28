@@ -31,7 +31,7 @@ type Hub struct {
 	notify      *notify.Manager
 
 	ingestSystem, ingestDocker, ingestLog, ingestAccess, ingestProcess atomic.Uint64
-	httpAPI, httpDashboard, httpHealth, httpMetrics, httpWS, httpOther  atomic.Uint64
+	httpAPI, httpDashboard, httpHealth, httpMetrics, httpWS, httpOther atomic.Uint64
 
 	dockerLogMu      sync.Mutex
 	dockerLogWaiters map[string]chan dockerLogResult
@@ -383,6 +383,7 @@ func (h *Hub) registerRoutes() {
 	h.mux.HandleFunc("GET /api/servers/{id}/access-logs", auth(h.handleRecentAccessLogs))
 	h.mux.HandleFunc("GET /api/servers/{id}/access-bad-requests", auth(h.handleAccessBadRequests))
 	h.mux.HandleFunc("GET /api/servers/{id}/access-slow-requests", auth(h.handleAccessSlowRequests))
+	h.mux.HandleFunc("GET /api/servers/{id}/access-timeline", auth(h.handleAccessTimeline))
 	h.mux.HandleFunc("GET /api/access-ip-policy", auth(h.handleAccessIPPolicy))
 	h.mux.HandleFunc("PUT /api/access-ip-policy", auth(csrf(h.handleAccessIPPolicy)))
 

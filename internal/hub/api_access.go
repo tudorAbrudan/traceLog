@@ -215,3 +215,17 @@ func (h *Hub) handleRecentAccessLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, logs)
 }
+
+func (h *Hub) handleAccessTimeline(w http.ResponseWriter, r *http.Request) {
+	serverID := r.PathValue("id")
+	rangeParam := r.URL.Query().Get("range")
+	if rangeParam == "" {
+		rangeParam = "24h"
+	}
+	timeline, err := h.store.GetAccessTimeline(r.Context(), serverID, rangeParam, h.accessStatsExcludeHubPathPrefix())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to load timeline")
+		return
+	}
+	writeJSON(w, http.StatusOK, timeline)
+}
