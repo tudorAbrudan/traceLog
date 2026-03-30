@@ -4,6 +4,20 @@ All notable changes to TraceLog are documented here. The format is loosely based
 
 ## [Unreleased]
 
+## [v0.2.19] - 2026-03-30
+
+### Added
+
+- **HTTP Analytics — auto-alert for new IP threats:** when a **new IP** appears in "Recommended to block" panel with **BLOCK decision**, automatically send email notification via configured channel (one-time alert per IP). Settings → General has optional **"IP threat auto-alert"** channel selector.
+
+### Fixed
+
+- **ipinfo.io API key not persisting:** `ipinfo_io_api_key` setting now saved to database (was missing from settings whitelist).
+
+### Changed
+
+- **IP threat alerts simplified:** removed per-IP manual "📧 Alert" button and channel selector from HTTP Analytics (auto-alerts now handle all new threats). **Add to list** button remains for manual blacklist management.
+
 ## [v0.2.18] - 2026-03-30
 
 ### Added
