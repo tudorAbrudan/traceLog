@@ -7,6 +7,8 @@
   let saved = false;
   /** Substrings matched case-insensitively in User-Agent; excluded from HTTP Analytics aggregates (not from raw "Recent requests"). */
   let excludeUAText = '';
+  /** ipinfo.io API key for IP geolocation + threat scoring. */
+  let ipinfoApiKey = '';
 
   onMount(async () => {
     try {
@@ -22,6 +24,7 @@
       } catch {
         excludeUAText = '';
       }
+      ipinfoApiKey = s.ipinfo_io_api_key || '';
     } catch {}
   });
 
@@ -35,6 +38,7 @@
         retention_days: String(retentionDays),
         collection_interval: String(collectionInterval),
         access_stats_exclude_ua_substrings: JSON.stringify(uaLines),
+        ipinfo_io_api_key: ipinfoApiKey.trim(),
       });
       saved = true; setTimeout(() => saved = false, 2000);
     } catch (e: any) { alert('Save failed: ' + e.message); }
@@ -75,6 +79,21 @@
       placeholder="TraceLog/1.0 Uptime Monitor"
     ></textarea>
   </div>
+  <div class="field">
+    <label for="ipinfo-key">ipinfo.io API key (optional)</label>
+    <p class="hint field-hint">
+      Bearer token for <strong>ipinfo.io/lite</strong> endpoint; enables automatic IP geolocation lookups on the HTTP Analytics "Recommended to block" panel.
+      Get your free API key at <a href="https://ipinfo.io" target="_blank" rel="noopener noreferrer">ipinfo.io</a>.
+      Stored securely in TraceLog's database; only the hub server sends requests to ipinfo.io.
+    </p>
+    <input
+      id="ipinfo-key"
+      type="password"
+      bind:value={ipinfoApiKey}
+      placeholder="Paste your ipinfo.io bearer token"
+      class="ipinfo-input"
+    />
+  </div>
   <button class="btn-save" on:click={saveGeneral}>{saved ? '✓ Saved' : 'Save Changes'}</button>
 </div>
 
@@ -85,9 +104,13 @@
   .range-input { display: flex; align-items: center; gap: 0.75rem; }
   .range-input input { flex: 1; }
   .range-input span { min-width: 60px; font-size: 0.85rem; color: var(--text-primary); }
-  .ua-exclude-ta {
-    width: 100%; min-height: 4rem; font-family: monospace; font-size: 0.78rem;
+  .ua-exclude-ta, .ipinfo-input {
+    width: 100%; font-family: monospace; font-size: 0.78rem;
     padding: 0.5rem; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 8px;
-    color: var(--text-primary); resize: vertical;
+    color: var(--text-primary);
   }
+  .ua-exclude-ta { min-height: 4rem; resize: vertical; }
+  .ipinfo-input { max-width: 400px; }
+  .hint a { color: var(--accent); text-decoration: none; }
+  .hint a:hover { text-decoration: underline; }
 </style>

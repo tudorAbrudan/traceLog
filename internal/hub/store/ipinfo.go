@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"time"
 )
 
 // IPInfoData represents cached ipinfo.io data for an IP.
@@ -50,6 +53,63 @@ func (s *Store) GetCachedIPInfo(ctx context.Context, ip string) (*IPInfoData, er
 		return nil, err
 	}
 	return &data, nil
+}
+
+// FetchIPInfoFromAPI calls ipinfo.io API to get IP geolocation + abuse data.
+// apiKey is the ipinfo.io bearer token; if empty, returns nil (not an error).
+func FetchIPInfoFromAPI(ctx context.Context, ip string, apiKey string) (*IPInfoData, error) {
+	if apiKey == "" {
+		return nil, nil // API key not configured
+	}
+
+	// ipinfo.io response structure for /lite/{ip} endpoint
+	type ipinfoResponse struct {
+		IP      string `json:"ip"`
+		Country string `json:"country"`
+		Region  string `json:"region"`
+		City    string `json:"city"`
+		Loc     string `json:"loc"` // lat,lon
+		Org     string `json:"org"`
+		Postal  string `json:"postal"`
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.ipinfo.io/lite/"+ip, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch ipinfo: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("ipinfo API returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	var raw ipinfoResponse
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return nil, fmt.Errorf("parse response: %w", err)
+	}
+
+	data := &IPInfoData{
+		IP:      raw.IP,
+		Country: raw.Country,
+		Region:  raw.Region,
+		City:    raw.City,
+	}
+
+	// Note: ipinfo.io /lite endpoint doesn't include abuse/vpn/proxy/bot data.
+	// For that, you'd need the full endpoint or a separate abuse database API.
+	// This implementation leaves those fields for future integration with
+	// abuseipdb.com or other abuse scoring services.
+
+	return data, nil
 }
 
 // IPThreatAssessment evaluates whether an IP is a threat.

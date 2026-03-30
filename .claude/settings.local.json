@@ -7,7 +7,8 @@
       "Bash(make:*)",
       "Bash(npm:*)",
       "Bash(npx:*)",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "Bash(grep:*)"
     ]
   }
 }
