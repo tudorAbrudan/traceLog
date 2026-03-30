@@ -6,11 +6,13 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/tudorAbrudan/tracelog/internal/hub/alerts"
 	"github.com/tudorAbrudan/tracelog/internal/hub/store"
 )
 
 // handleThreatIPInfo returns ipinfo data + threat assessment for given IPs.
 // Tries cache first, then fetches from ipinfo.io API if configured and not cached.
+// Auto-sends email alert for NEW IPs with BLOCK decision if channel configured in settings.
 // POST /api/threat/ipinfo
 // Body: {"ips": ["1.2.3.4", ...], "traffic_scores": {"1.2.3.4": 5, ...}}
 func (h *Hub) handleThreatIPInfo(w http.ResponseWriter, r *http.Request) {
@@ -23,8 +25,9 @@ func (h *Hub) handleThreatIPInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get ipinfo.io API key from settings
+	// Get ipinfo.io API key + auto-alert channel from settings
 	apiKey, _ := h.store.GetSetting(r.Context(), "ipinfo_io_api_key")
+	autoAlertChannelID, _ := h.store.GetSetting(r.Context(), "ip_threat_auto_alert_channel")
 
 	assessments := make([]*store.IPThreatAssessment, 0)
 	for _, ip := range body.IPs {
@@ -58,6 +61,28 @@ func (h *Hub) handleThreatIPInfo(w http.ResponseWriter, r *http.Request) {
 		trafficScore := body.TrafficScores[ip]
 		assessment := store.AssessIPThreat(ipinfo, trafficScore)
 		assessments = append(assessments, assessment)
+
+		// Auto-alert if NEW IP with BLOCK decision and channel configured
+		if autoAlertChannelID != "" && assessment.Decision == "block" {
+			wasAlerted, err := h.store.HasIPThreatBeenAlerted(r.Context(), ip)
+			if err != nil {
+				slog.Debug("check ip threat alert", "ip", ip, "error", err)
+			} else if !wasAlerted {
+				// New IP with BLOCK decision: send alert
+				alert := &alerts.Alert{
+					RuleID:  "ip_threat_" + strings.ReplaceAll(ip, ".", "_"),
+					Metric:  "IP_THREAT_NEW",
+					Message: "New IP threat detected: " + ip + " (" + assessment.Risk + " risk). Reasons: " + strings.Join(assessment.Reasons, "; "),
+				}
+				if err := h.notifyAlert(r.Context(), autoAlertChannelID, alert); err != nil {
+					slog.Debug("send ip threat alert", "ip", ip, "channel", autoAlertChannelID, "error", err)
+				}
+				// Mark as alerted
+				if err := h.store.RecordIPThreatAlert(r.Context(), ip); err != nil {
+					slog.Debug("record ip threat alert", "ip", ip, "error", err)
+				}
+			}
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"assessments": assessments})

@@ -121,6 +121,27 @@ type IPThreatAssessment struct {
 	Score    int      `json:"score"`
 }
 
+// RecordIPThreatAlert marks an IP as having been alerted on (for auto-notification tracking).
+func (s *Store) RecordIPThreatAlert(ctx context.Context, ip string) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT OR REPLACE INTO ip_threat_alerts (ip, first_seen, last_alerted)
+		 VALUES (?, COALESCE((SELECT first_seen FROM ip_threat_alerts WHERE ip = ?), CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)`,
+		ip, ip)
+	return err
+}
+
+// HasIPThreatBeenAlerted checks if we've already sent an alert for this IP (ever, not time-based).
+func (s *Store) HasIPThreatBeenAlerted(ctx context.Context, ip string) (bool, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM ip_threat_alerts WHERE ip = ?`,
+		ip).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 // AssessIPThreat returns a threat assessment based on ipinfo data and access stats.
 // score is the existing threat score from HTTP Analytics (0-10+).
 func AssessIPThreat(ipinfo *IPInfoData, trafficScore int) *IPThreatAssessment {

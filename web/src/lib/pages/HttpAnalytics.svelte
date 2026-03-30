@@ -10,7 +10,6 @@
 
   // --- State ---
   let servers: any[] = [];
-  let channels: any[] = [];
   let selectedServer = '';
   let range_ = '24h';
   let stats: any = null;
@@ -28,10 +27,6 @@
   let slowLogs: any[] = [];
   let slowLoading = false;
   let slowMinMs = 500;
-
-  // IP threat alerting
-  let selectedChannelId = '';
-  let alertingSent = '';
 
   let activeTab: 'overview' | 'paths' | 'clients' | 'requests' = 'overview';
 
@@ -233,20 +228,6 @@
     blacklistDirty = true;
   }
 
-  async function sendIPThreatAlert(ip: string, reason: string) {
-    if (!selectedChannelId) {
-      alert('Please select a notification channel');
-      return;
-    }
-    try {
-      await api.createIPThreatAlert(ip, reason, selectedChannelId);
-      alertingSent = ip;
-      setTimeout(() => { alertingSent = ''; }, 3000);
-    } catch (e) {
-      alert('Failed to send alert: ' + (e instanceof Error ? e.message : String(e)));
-    }
-  }
-
   // Rebuild chart when tab or data changes
   $: if (activeTab === 'overview' && timeline && chartEl) {
     scheduleBuildChart();
@@ -418,7 +399,6 @@
     void (async () => {
       try {
         servers = (await api.listServers()) ?? [];
-        channels = (await api.listNotificationChannels()) ?? [];
         if (servers.length > 0) {
           const ctx = get(contextServerId);
           if (ctx && servers.some((s) => s.id === ctx)) {
@@ -640,23 +620,6 @@
                 {/if}
               </div>
             </div>
-            {#if recommendedToBlock.some((r: any) => r.assessment?.decision === 'block')}
-              <div class="alert-config">
-                <label>
-                  Send email alert for flagged IPs:
-                  <select bind:value={selectedChannelId} class="channel-select">
-                    <option value="">— Select channel —</option>
-                    {#if channels && channels.length > 0}
-                      {#each channels as ch}
-                        {#if ch.type === 'email'}
-                          <option value={ch.id}>{ch.name}</option>
-                        {/if}
-                      {/each}
-                    {/if}
-                  </select>
-                </label>
-              </div>
-            {/if}
             <table>
               <thead>
                 <tr>
@@ -709,15 +672,8 @@
                         {row.assessment?.decision?.toUpperCase() || '?'}
                       </span>
                     </td>
-                    <td class="actions-cell">
-                      {#if alertingSent === row.ip}
-                        <span class="alert-sent">✓ Alert sent</span>
-                      {:else}
-                        <button type="button" class="btn-add-one" on:click={() => addToBlacklist(row.ip)}>Add to list</button>
-                        {#if row.assessment?.decision === 'block' && selectedChannelId}
-                          <button type="button" class="btn-alert-ip" on:click={() => sendIPThreatAlert(row.ip, row.assessment?.decision)}>📧 Alert</button>
-                        {/if}
-                      {/if}
+                    <td>
+                      <button type="button" class="btn-add-one" on:click={() => addToBlacklist(row.ip)}>Add to list</button>
                     </td>
                   </tr>
                 {/each}
@@ -1148,32 +1104,18 @@
   .recommend-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
   .recommend-title { margin: 0 0 0.15rem; font-size: 0.88rem; color: #f85149; }
   .recommend-note { font-size: 0.72rem; color: var(--text-muted); margin: 0.5rem 0 0; line-height: 1.4; }
-  .alert-config {
-    margin: 0.5rem 0 0; padding: 0.5rem 0.75rem; background: #f8514911; border-radius: 6px;
-    font-size: 0.75rem; display: flex; gap: 0.5rem; align-items: center;
-  }
-  .alert-config label { display: flex; gap: 0.35rem; align-items: center; }
-  .channel-select { padding: 0.2rem 0.4rem; font-size: 0.75rem; border-radius: 4px; border: 1px solid var(--border); }
   .btn-add-all {
     padding: 0.35rem 0.85rem; font-size: 0.78rem; font-weight: 600;
     border-radius: 7px; cursor: pointer; white-space: nowrap;
     border: 1px solid #f85149; background: #f8514911; color: #f85149;
   }
   .btn-add-all:hover { background: #f8514922; }
-  .btn-add-one, .btn-alert-ip {
+  .btn-add-one {
     padding: 0.2rem 0.55rem; font-size: 0.72rem; font-weight: 600;
     border-radius: 5px; cursor: pointer; white-space: nowrap;
-  }
-  .btn-add-one {
     border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-primary);
   }
   .btn-add-one:hover { border-color: var(--accent); color: var(--accent); }
-  .btn-alert-ip {
-    border: 1px solid #58a6ff; background: transparent; color: #58a6ff; margin-left: 0.25rem;
-  }
-  .btn-alert-ip:hover { background: #58a6ff11; }
-  .actions-cell { display: flex; gap: 0.25rem; align-items: center; }
-  .alert-sent { font-size: 0.7rem; color: #3fb950; font-weight: 600; }
 
 
   /* Policy / blacklist box */

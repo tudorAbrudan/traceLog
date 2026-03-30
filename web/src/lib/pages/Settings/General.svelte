@@ -9,6 +9,9 @@
   let excludeUAText = '';
   /** ipinfo.io API key for IP geolocation + threat scoring. */
   let ipinfoApiKey = '';
+  /** Notification channel for auto-alerts on new IP threats. */
+  let ipThreatAutoAlertChannel = '';
+  let channels: any[] = [];
 
   onMount(async () => {
     try {
@@ -25,6 +28,14 @@
         excludeUAText = '';
       }
       ipinfoApiKey = s.ipinfo_io_api_key || '';
+      ipThreatAutoAlertChannel = s.ip_threat_auto_alert_channel || '';
+
+      // Load notification channels
+      try {
+        channels = (await api.listNotificationChannels()) || [];
+      } catch {
+        channels = [];
+      }
     } catch {}
   });
 
@@ -39,6 +50,7 @@
         collection_interval: String(collectionInterval),
         access_stats_exclude_ua_substrings: JSON.stringify(uaLines),
         ipinfo_io_api_key: ipinfoApiKey.trim(),
+        ip_threat_auto_alert_channel: ipThreatAutoAlertChannel.trim(),
       });
       saved = true; setTimeout(() => saved = false, 2000);
     } catch (e: any) { alert('Save failed: ' + e.message); }
@@ -94,6 +106,23 @@
       class="ipinfo-input"
     />
   </div>
+  <div class="field">
+    <label for="ip-threat-channel">IP threat auto-alert (optional)</label>
+    <p class="hint field-hint">
+      When a <strong>new IP</strong> appears in HTTP Analytics "Recommended to block" panel with <strong>BLOCK decision</strong>, automatically send email alert via selected channel.
+      Once an IP is alerted, no further notifications for that IP. Leave empty to disable auto-alerts.
+    </p>
+    <select id="ip-threat-channel" bind:value={ipThreatAutoAlertChannel} class="channel-select">
+      <option value="">— Disabled (no auto-alerts) —</option>
+      {#if channels && channels.length > 0}
+        {#each channels as ch}
+          {#if ch.type === 'email'}
+            <option value={ch.id}>{ch.name}</option>
+          {/if}
+        {/each}
+      {/if}
+    </select>
+  </div>
   <button class="btn-save" on:click={saveGeneral}>{saved ? '✓ Saved' : 'Save Changes'}</button>
 </div>
 
@@ -104,13 +133,13 @@
   .range-input { display: flex; align-items: center; gap: 0.75rem; }
   .range-input input { flex: 1; }
   .range-input span { min-width: 60px; font-size: 0.85rem; color: var(--text-primary); }
-  .ua-exclude-ta, .ipinfo-input {
+  .ua-exclude-ta, .ipinfo-input, .channel-select {
     width: 100%; font-family: monospace; font-size: 0.78rem;
     padding: 0.5rem; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 8px;
     color: var(--text-primary);
   }
   .ua-exclude-ta { min-height: 4rem; resize: vertical; }
-  .ipinfo-input { max-width: 400px; }
+  .ipinfo-input, .channel-select { max-width: 400px; font-family: inherit; }
   .hint a { color: var(--accent); text-decoration: none; }
   .hint a:hover { text-decoration: underline; }
 </style>

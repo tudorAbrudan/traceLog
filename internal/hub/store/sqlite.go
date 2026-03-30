@@ -78,6 +78,7 @@ func (s *Store) migrate() error {
 		migration008,
 		migration009,
 		migration010,
+		migration011,
 	}
 
 	for i := currentVersion; i < len(migrations); i++ {
@@ -317,6 +318,14 @@ CREATE TABLE IF NOT EXISTS ipinfo_cache (
     ip TEXT PRIMARY KEY,
     data TEXT NOT NULL,
     fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+`
+
+const migration011 = `
+CREATE TABLE IF NOT EXISTS ip_threat_alerts (
+    ip TEXT PRIMARY KEY,
+    first_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_alerted DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 `
 

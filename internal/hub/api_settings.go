@@ -25,6 +25,7 @@ func (h *Hub) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		"retention_days":                     true,
 		"collection_interval":                true,
 		"access_stats_exclude_ua_substrings": true,
+		"ipinfo_io_api_key":                  true,
 	}
 	for k, v := range settings {
 		if !allowedKeys[k] {
