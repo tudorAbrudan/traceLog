@@ -6,7 +6,7 @@ import (
 )
 
 // InsertAlertHistory records a fired alert for the dashboard history list.
-func (s *Store) InsertAlertHistory(ctx context.Context, ruleID, serverID, state, message string) error {
+func (s *Store) InsertAlertHistory(ctx context.Context, ruleID, serverID, channelID, state, message string) error {
 	if ruleID == "" {
 		ruleID = "unknown"
 	}
@@ -14,8 +14,8 @@ func (s *Store) InsertAlertHistory(ctx context.Context, ruleID, serverID, state,
 		state = "fired"
 	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO alert_history (rule_id, server_id, state, message) VALUES (?, ?, ?, ?)`,
-		ruleID, nullString(serverID), state, message)
+		`INSERT INTO alert_history (rule_id, server_id, channel_id, state, message) VALUES (?, ?, ?, ?, ?)`,
+		ruleID, nullString(serverID), nullString(channelID), state, message)
 	return err
 }
 
@@ -28,12 +28,13 @@ func nullString(s string) any {
 
 // AlertHistoryRow is one stored notification event.
 type AlertHistoryRow struct {
-	ID       int64  `json:"id"`
-	RuleID   string `json:"rule_id"`
-	ServerID string `json:"server_id"`
-	State    string `json:"state"`
-	Message  string `json:"message"`
-	Ts       string `json:"ts"`
+	ID        int64  `json:"id"`
+	RuleID    string `json:"rule_id"`
+	ServerID  string `json:"server_id"`
+	ChannelID string `json:"channel_id"`
+	State     string `json:"state"`
+	Message   string `json:"message"`
+	Ts        string `json:"ts"`
 }
 
 // ListAlertHistoryRecent returns newest rows first.
@@ -42,7 +43,7 @@ func (s *Store) ListAlertHistoryRecent(ctx context.Context, limit int) ([]AlertH
 		limit = 100
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, rule_id, COALESCE(server_id, ''), state, COALESCE(message, ''), COALESCE(ts, '')
+		`SELECT id, rule_id, COALESCE(server_id, ''), COALESCE(channel_id, ''), state, COALESCE(message, ''), COALESCE(ts, '')
 		 FROM alert_history ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list alert history: %w", err)
@@ -52,7 +53,7 @@ func (s *Store) ListAlertHistoryRecent(ctx context.Context, limit int) ([]AlertH
 	var out []AlertHistoryRow
 	for rows.Next() {
 		var r AlertHistoryRow
-		if err := rows.Scan(&r.ID, &r.RuleID, &r.ServerID, &r.State, &r.Message, &r.Ts); err != nil {
+		if err := rows.Scan(&r.ID, &r.RuleID, &r.ServerID, &r.ChannelID, &r.State, &r.Message, &r.Ts); err != nil {
 			return nil, err
 		}
 		out = append(out, r)

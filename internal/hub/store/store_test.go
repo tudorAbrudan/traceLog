@@ -534,14 +534,14 @@ func TestAlertHistoryInsertAndList(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	if err := s.InsertAlertHistory(ctx, "rule1", "srv1", "fired", "hello"); err != nil {
+	if err := s.InsertAlertHistory(ctx, "rule1", "srv1", "ch1", "fired", "hello"); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := s.ListAlertHistoryRecent(ctx, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 1 || rows[0].RuleID != "rule1" || rows[0].ServerID != "srv1" || rows[0].Message != "hello" {
+	if len(rows) != 1 || rows[0].RuleID != "rule1" || rows[0].ServerID != "srv1" || rows[0].ChannelID != "ch1" || rows[0].Message != "hello" {
 		t.Fatalf("unexpected row: %+v", rows[0])
 	}
 }

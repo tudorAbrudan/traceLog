@@ -194,6 +194,10 @@ export const api = {
   putAccessIPPolicy: (ips: string[]) => request('PUT', '/access-ip-policy', { ips }),
   getAccessTimeline: (serverId: string, range: string) =>
     request('GET', `/servers/${encodeURIComponent(serverId)}/access-timeline?range=${encodeURIComponent(range)}`),
+  getThreatAssessments: (ips: string[], trafficScores: Record<string, number>) =>
+    request('POST', '/threat/ipinfo', { ips, traffic_scores: trafficScores }),
+  createIPThreatAlert: (ip: string, reason: string, channelId: string) =>
+    request('POST', '/threat/alert-ip', { ip, reason, channel_id: channelId }),
 
   // Detection
   detect: () => request('GET', '/detect'),

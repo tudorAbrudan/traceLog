@@ -76,9 +76,23 @@ func (s *Store) migrate() error {
 		migration006,
 		migration007,
 		migration008,
+		migration009,
+		migration010,
 	}
 
 	for i := currentVersion; i < len(migrations); i++ {
+		// migration009 adds alert_history.channel_id.
+		// New DBs already include it via the updated CREATE TABLE schema,
+		// so skip the ALTER when the column exists to avoid "duplicate column name".
+		if i == 8 { // migration009 (0-based)
+			var has int
+			if err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('alert_history') WHERE name = 'channel_id'`).Scan(&has); err == nil && has > 0 {
+				if _, err := s.db.Exec("INSERT INTO schema_version (version) VALUES (?)", i+1); err != nil {
+					return fmt.Errorf("update schema version to %d: %w", i+1, err)
+				}
+				continue
+			}
+		}
 		slog.Info("Running migration", "version", i+1)
 		if _, err := s.db.Exec(migrations[i]); err != nil {
 			return fmt.Errorf("migration %d: %w", i+1, err)
@@ -207,6 +221,7 @@ CREATE TABLE IF NOT EXISTS alert_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     rule_id TEXT NOT NULL,
     server_id TEXT,
+    channel_id TEXT,
     state TEXT NOT NULL,
     message TEXT,
     ts DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -291,6 +306,18 @@ CREATE INDEX IF NOT EXISTS idx_access_logs_ip ON access_logs(ip);
 
 const migration008 = `
 ALTER TABLE servers ADD COLUMN alerts_muted INTEGER NOT NULL DEFAULT 0;
+`
+
+const migration009 = `
+ALTER TABLE alert_history ADD COLUMN channel_id TEXT;
+`
+
+const migration010 = `
+CREATE TABLE IF NOT EXISTS ipinfo_cache (
+    ip TEXT PRIMARY KEY,
+    data TEXT NOT NULL,
+    fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
 `
 
 func (s *Store) Backup(ctx context.Context, destPath string) error {

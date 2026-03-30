@@ -7,6 +7,7 @@
   // Alerts
   let alertRules: any[] = [];
   let alertHistory: any[] = [];
+  let emailHistory: any[] = [];
   /** Substring silences for ingested log alert notifications (Settings → Alerts). */
   let logSilences: any[] = [];
   let newSilencePattern = '';
@@ -77,6 +78,29 @@
     if (!newAlertServerId && servers.length > 0) {
       newAlertServerId = servers[0].id;
     }
+  });
+
+  function emailToForChannel(channelId: string): string {
+    if (!channelId) return '';
+    const ch = channels.find((c) => c.id === channelId);
+    if (!ch || ch.type !== 'email') return '';
+    try {
+      const cfg = JSON.parse(ch.config || '{}');
+      return typeof cfg.to === 'string' ? cfg.to : '';
+    } catch {
+      return '';
+    }
+  }
+
+  function emailChannelName(channelId: string): string {
+    if (!channelId) return '';
+    const ch = channels.find((c) => c.id === channelId);
+    return ch?.name || channelId;
+  }
+
+  $: emailHistory = alertHistory.filter((row) => {
+    const ch = channels.find((c) => c.id === row.channel_id);
+    return ch?.type === 'email';
   });
 
   async function addAlert() {
@@ -332,28 +356,6 @@
   {/if}
 </div>
 
-<div class="section">
-  <h3>Recent alert notifications</h3>
-  <p class="hint">
-    Rows appear when the hub <strong>sends</strong> a notification (email/webhook) for a rule. Newest first. This is not a full audit trail.
-  </p>
-  {#if alertHistory.length === 0}
-    <p class="hint">None yet — trigger an alert or use Test on a notification channel.</p>
-  {:else}
-    <div class="item-list">
-      {#each alertHistory as row (row.id)}
-        <div class="item-row alert-history-row">
-          <div>
-            <span class="item-detail">{row.ts}</span>
-            <span class="item-detail">Rule <code>{row.rule_id}</code> · {silenceServerLabel(row.server_id)}</span>
-            <span class="item-detail alert-history-msg">{row.message}</span>
-          </div>
-        </div>
-      {/each}
-    </div>
-  {/if}
-</div>
-
 <div class="section silence-section">
   <h3>Log alert silences</h3>
   <p class="hint">
@@ -390,8 +392,39 @@
   {/if}
 </div>
 
+<div class="section email-history-section">
+  <h3>Emails sent</h3>
+  <p class="hint">
+    Rows appear when the hub <strong>sends an email</strong> for a rule (newest first). This is not a full audit trail.
+  </p>
+  {#if emailHistory.length === 0}
+    <p class="hint">None yet — trigger an alert or use Test on an email notification channel.</p>
+  {:else}
+    <div class="item-list">
+      {#each emailHistory as row (row.id)}
+        <div class="item-row alert-history-row">
+          <div>
+            <span class="item-detail">{row.ts}</span>
+            <span class="item-detail">
+              Rule <code>{row.rule_id}</code> · {silenceServerLabel(row.server_id)}
+              {#if row.channel_id}
+                · Email channel: {emailChannelName(row.channel_id)}
+              {/if}
+            </span>
+            {#if emailToForChannel(row.channel_id)}
+              <span class="item-detail alert-history-msg">To: {emailToForChannel(row.channel_id)}</span>
+            {/if}
+            <span class="item-detail alert-history-msg">{row.message}</span>
+          </div>
+        </div>
+      {/each}
+    </div>
+  {/if}
+</div>
+
 <style>
   .silence-section { margin-top: 1.75rem; padding-top: 1.25rem; border-top: 1px solid var(--border); }
+  .email-history-section { margin-top: 1.75rem; padding-top: 1.25rem; border-top: 1px solid var(--border); }
   .silence-form .silence-pattern-input { min-width: 200px; flex: 1; max-width: 420px; }
   .silence-form .silence-select { min-width: 160px; }
   .silence-pattern { word-break: break-word; }

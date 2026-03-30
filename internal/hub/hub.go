@@ -89,7 +89,7 @@ func (h *Hub) notifyAlert(ctx context.Context, channelID string, alert *alerts.A
 	if h.isServerMuted(sid) {
 		return nil // alert notifications muted for this server
 	}
-	if err := h.store.InsertAlertHistory(ctx, alert.RuleID, sid, "fired", alert.Message); err != nil {
+	if err := h.store.InsertAlertHistory(ctx, alert.RuleID, sid, channelID, "fired", alert.Message); err != nil {
 		slog.Debug("alert history insert", "error", err)
 	}
 	body := formatAlertNotificationBody(h.store, ctx, alert, sid)
@@ -411,6 +411,10 @@ func (h *Hub) registerRoutes() {
 	h.mux.HandleFunc("PUT /api/notifications/{id}", auth(csrf(h.handleUpdateNotificationChannel)))
 	h.mux.HandleFunc("DELETE /api/notifications/{id}", auth(csrf(h.handleDeleteNotificationChannel)))
 	h.mux.HandleFunc("POST /api/notifications/{id}/test", auth(csrf(h.handleTestNotificationChannel)))
+
+	// Threat assessment
+	h.mux.HandleFunc("POST /api/threat/ipinfo", auth(h.handleThreatIPInfo))
+	h.mux.HandleFunc("POST /api/threat/alert-ip", auth(csrf(h.handleCreateIPThreatAlert)))
 
 	// Agent API key (no session): log source config for remote tail
 	h.mux.HandleFunc("GET /api/agent/log-sources", h.handleAgentLogSources)

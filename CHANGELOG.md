@@ -4,6 +4,12 @@ All notable changes to TraceLog are documented here. The format is loosely based
 
 ## [Unreleased]
 
+### Added
+
+- **HTTP Analytics — IP threat assessment (ipinfo.io integration):** `ipinfo_cache` table stores IP geo + abuse data; `GET /api/threat/ipinfo` returns cached data with threat decision (block/monitor/allow) based on abuse confidence score + traffic pattern analysis. **Recommended to block** panel now shows Country/Region, abuse confidence %, and decision badge per IP.
+- **HTTP Analytics — IP threat email alerts:** configurable **notification channel selector** in the **Recommended to block** panel; **📧 Alert** button per IP sends email via selected channel when decision is "block". `POST /api/threat/alert-ip` endpoint logs alert to `alert_history`.
+- **Alert history — channel tracking:** `alert_history.channel_id` column (migration 010) tracks which notification channel sent each alert; Settings → Alerts shows **Emails sent** table filtered to email-only notifications with recipient email and channel name.
+
 ## [v0.2.17] - 2026-03-28
 
 ### Fixed

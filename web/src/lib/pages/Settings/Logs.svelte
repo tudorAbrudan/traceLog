@@ -23,10 +23,13 @@
   function syncIngestPickFromSources() {
     const next: Record<string, Record<string, boolean>> = {};
     for (const ls of logSources) {
+      // Backend semantics:
+      // - ingest_levels is omitted/null => "no filter" => store ALL severities.
+      // - ingest_levels contains a list => store only those severities.
       const cur = ls.ingest_levels;
       const row: Record<string, boolean> = {};
       for (const lv of ingestLevelOpts) {
-        row[lv] = Array.isArray(cur) && cur.includes(lv);
+        row[lv] = Array.isArray(cur) ? cur.includes(lv) : true;
       }
       next[ls.id] = row;
     }
@@ -76,12 +79,38 @@
     try {
       const d = await api.detect();
       if (d.log_files && d.log_files.length > 0) {
+        // Ensure we only create truly new sources (repeated scans should be idempotent).
+        const existing = (await api.listLogSources()) || [];
+        // Dedupe by "is this the same underlying file already configured?"
+        // We intentionally ignore `format` here so repeated scans don't create duplicates
+        // for the same `path` (even if the parser format was set differently before).
+        const keyFor = (ls: any) => `${(ls.server_id ?? '').trim()}|${(ls.type ?? '').trim()}|${(ls.path ?? '').trim()}`;
+        const existingKeys = new Set(existing.map(keyFor));
+
+        let added = 0;
         for (const lf of d.log_files) {
-          await api.createLogSource({ name: lf.name, path: lf.path, format: lf.format, type: lf.type, server_id: '', enabled: true });
+          const key = `${''}|${(lf.type ?? '').trim()}|${(lf.path ?? '').trim()}`;
+          if (existingKeys.has(key)) continue;
+          existingKeys.add(key);
+
+          await api.createLogSource({
+            name: lf.name,
+            path: lf.path,
+            format: lf.format,
+            type: lf.type,
+            server_id: '',
+            enabled: true,
+          });
+          added++;
         }
+
         logSources = (await api.listLogSources()) || [];
         syncIngestPickFromSources();
-        alert(`Found and added ${d.log_files.length} log sources.`);
+        if (added > 0) {
+          alert(`Found and added ${added} new log sources.`);
+        } else {
+          alert(`No new common log files found.`);
+        }
       } else {
         alert('No common log files found on this system.');
       }
