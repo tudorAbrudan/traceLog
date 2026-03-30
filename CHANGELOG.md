@@ -4,6 +4,8 @@ All notable changes to TraceLog are documented here. The format is loosely based
 
 ## [Unreleased]
 
+## [v0.2.18] - 2026-03-30
+
 ### Added
 
 - **HTTP Analytics — IP threat assessment (ipinfo.io integration):** `ipinfo_cache` table stores IP geo + abuse data; `GET /api/threat/ipinfo` returns cached data with threat decision (block/monitor/allow) based on abuse confidence score + traffic pattern analysis. **Recommended to block** panel now shows Country/Region, abuse confidence %, and decision badge per IP.
