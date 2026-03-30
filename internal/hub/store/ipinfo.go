@@ -125,7 +125,6 @@ type IPThreatAssessment struct {
 // score is the existing threat score from HTTP Analytics (0-10+).
 func AssessIPThreat(ipinfo *IPInfoData, trafficScore int) *IPThreatAssessment {
 	assess := &IPThreatAssessment{
-		IP:    ipinfo.IP,
 		Risk:  "low",
 		Score: trafficScore,
 	}
