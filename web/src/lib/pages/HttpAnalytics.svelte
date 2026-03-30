@@ -233,6 +233,11 @@
     scheduleBuildChart();
   }
 
+  // Lazy load Requests tab data when tab is activated
+  $: if (activeTab === 'requests') {
+    void loadTabData();
+  }
+
   // --- Helpers ---
   function whoisHref(ip: string): string {
     return `https://ipwho.is/${encodeURIComponent(ip)}`;
@@ -340,6 +345,7 @@
     if (!selectedServer) return;
     loadError = '';
     try {
+      // Load Overview tab data only (lazy load other tabs)
       const [st, tl, recent, policy] = await Promise.all([
         api.getAccessStats(selectedServer, range_, 50),
         api.getAccessTimeline(selectedServer, range_).catch(() => null),
@@ -353,10 +359,21 @@
       if (!blacklistDirty) {
         blacklistText = ips.join('\n');
       }
-      await refreshBadRequests();
-      await refreshSlowRequests();
+      // Only load bad/slow requests if on "Requests" tab (lazy loading)
+      if (activeTab === 'requests') {
+        await refreshBadRequests();
+        await refreshSlowRequests();
+      }
     } catch (e) {
       loadError = (e as Error).message || 'Failed to load analytics';
+    }
+  }
+
+  async function loadTabData() {
+    // Lazy load tab-specific data only when tab is activated
+    if (activeTab === 'requests' && badLogs.length === 0 && !badLoading && !slowLoading) {
+      await refreshBadRequests();
+      await refreshSlowRequests();
     }
   }
 

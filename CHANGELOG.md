@@ -4,6 +4,19 @@ All notable changes to TraceLog are documented here. The format is loosely based
 
 ## [Unreleased]
 
+## [v0.2.21] - 2026-03-30
+
+### Changed
+
+- **HTTP Analytics — lazy load tab data:** "Requests" tab (bad/slow requests) now loads only when tab is activated, significantly improving initial page load speed. Overview tab loads immediately with stats, timeline, and recent logs.
+
+## [v0.2.20] - 2026-03-30
+
+### Fixed
+
+- **ipinfo.io data not displaying:** Country and Abuse % columns were showing "-" instead of geolocation data; now IPInfoData is included in threat assessment response so frontend can display it.
+- **Auto-alert channel not persisting:** `ip_threat_auto_alert_channel` setting was not being saved (missing from settings whitelist); now saves and loads correctly.
+
 ## [v0.2.19] - 2026-03-30
 
 ### Added
