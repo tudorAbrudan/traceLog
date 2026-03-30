@@ -114,11 +114,12 @@ func FetchIPInfoFromAPI(ctx context.Context, ip string, apiKey string) (*IPInfoD
 
 // IPThreatAssessment evaluates whether an IP is a threat.
 type IPThreatAssessment struct {
-	IP       string   `json:"ip"`
-	Risk     string   `json:"risk"` // "high", "medium", "low", "unknown"
-	Reasons  []string `json:"reasons,omitempty"`
-	Decision string   `json:"decision"` // "block", "monitor", "allow"
-	Score    int      `json:"score"`
+	IP       string      `json:"ip"`
+	Risk     string      `json:"risk"` // "high", "medium", "low", "unknown"
+	Reasons  []string    `json:"reasons,omitempty"`
+	Decision string      `json:"decision"` // "block", "monitor", "allow"
+	Score    int         `json:"score"`
+	IPInfo   *IPInfoData `json:"ipinfo,omitempty"` // geolocation + abuse data from ipinfo.io
 }
 
 // RecordIPThreatAlert marks an IP as having been alerted on (for auto-notification tracking).

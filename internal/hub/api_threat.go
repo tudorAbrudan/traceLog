@@ -60,6 +60,7 @@ func (h *Hub) handleThreatIPInfo(w http.ResponseWriter, r *http.Request) {
 
 		trafficScore := body.TrafficScores[ip]
 		assessment := store.AssessIPThreat(ipinfo, trafficScore)
+		assessment.IPInfo = ipinfo // Include ipinfo data in response for frontend
 		assessments = append(assessments, assessment)
 
 		// Auto-alert if NEW IP with BLOCK decision and channel configured
