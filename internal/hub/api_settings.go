@@ -26,6 +26,7 @@ func (h *Hub) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		"collection_interval":                true,
 		"access_stats_exclude_ua_substrings": true,
 		"ipinfo_io_api_key":                  true,
+		"ip_threat_auto_alert_channel":       true,
 	}
 	for k, v := range settings {
 		if !allowedKeys[k] {
