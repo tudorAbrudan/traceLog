@@ -4,6 +4,13 @@ All notable changes to TraceLog are documented here. The format is loosely based
 
 ## [Unreleased]
 
+## [v0.2.27] - 2026-03-31
+
+### Fixed
+
+- **Country column now populated:** `ipinfo` data was fetched but not surfaced onto the row — fixed by spreading `ipinfo` alongside `assessment` in the Clients tab.
+- **IP threat auto-alerts — require ipinfo confirmation:** auto-alert now only fires when ipinfo.io confirms the threat (`abuse_confidence > 25%` OR `is_bot`). Previously, IPs with 2–3 requests hitting a scanner path could score ≥ 6 purely from traffic heuristics and spam email alerts.
+
 ## [v0.2.26] - 2026-03-31
 
 ### Changed

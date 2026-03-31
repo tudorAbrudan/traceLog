@@ -64,9 +64,12 @@ func (h *Hub) handleThreatIPInfo(w http.ResponseWriter, r *http.Request) {
 		assessment.IPInfo = ipinfo // Include ipinfo data in response for frontend
 		assessments = append(assessments, assessment)
 
-		// Auto-alert if NEW IP with HIGH risk (not just block decision) and channel configured
-		// Only alert for high-risk IPs to avoid spam
-		if autoAlertChannelID != "" && assessment.Risk == "high" && assessment.Decision == "block" {
+		// Auto-alert only when ipinfo CONFIRMS the threat: abuse confidence >25% or bot detected.
+		// Pure traffic-score IPs (scanner paths, bad UAs) don't trigger alerts — they can be
+		// triggered by just 2-3 requests and cause email spam.
+		ipinfoConfirmed := assessment.IPInfo != nil &&
+			(assessment.IPInfo.AbuseConfidence > 25 || assessment.IPInfo.IsBot)
+		if autoAlertChannelID != "" && assessment.Risk == "high" && assessment.Decision == "block" && ipinfoConfirmed {
 			wasAlerted, err := h.store.HasIPThreatBeenAlerted(r.Context(), ip)
 			if err != nil {
 				slog.Warn("check ip threat alert", "ip", ip, "error", err)

@@ -230,6 +230,7 @@
           recommendedToBlock = recommendedToBlock.map((ip: any) => ({
             ...ip,
             assessment: assessmentMap.get(ip.ip),
+            ipinfo: (assessmentMap.get(ip.ip) as any)?.ipinfo,
           }));
         }
       } catch (e) {
