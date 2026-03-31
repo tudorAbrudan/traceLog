@@ -4,6 +4,12 @@ All notable changes to TraceLog are documented here. The format is loosely based
 
 ## [Unreleased]
 
+## [v0.2.26] - 2026-03-31
+
+### Changed
+
+- **HTTP Analytics — dual-series timeline chart:** Overview tab "Trafic HTTP" chart now shows two lines — **Requests** (blue, left axis) and **Timp mediu (ms)** (purple, right axis) — with a legend. Backend now returns `avg_duration_ms` per bucket in `access-timeline` response.
+
 ## [v0.2.25] - 2026-03-31
 
 ### Fixed

@@ -13,7 +13,7 @@
   let selectedServer = '';
   let range_ = '24h';
   let stats: any = null;
-  let timeline: { points: Array<{ ts: string; count: number }>; bucket_minutes: number } | null = null;
+  let timeline: { points: Array<{ ts: string; count: number; avg_duration_ms: number }>; bucket_minutes: number } | null = null;
   let recentLogs: any[] = [];
   let loading = true;
   let loadError = '';
@@ -59,20 +59,29 @@
 
     const xs = timeline.points.map((p) => new Date(p.ts).getTime() / 1000);
     const ys = timeline.points.map((p) => p.count);
+    const ms = timeline.points.map((p) => p.avg_duration_ms);
 
     uplot = new uPlot(
       {
         width: w,
-        height: 140,
+        height: 180,
         padding: [8, 8, 0, 0],
         series: [
           {},
           {
             label: 'Requests',
-            stroke: '#58a6ff',
-            fill: '#58a6ff22',
+            stroke: '#4dabf7',
+            fill: '#4dabf722',
             width: 1.5,
             points: { show: false },
+            scale: 'req',
+          },
+          {
+            label: 'Timp mediu (ms)',
+            stroke: '#a78bfa',
+            width: 1.5,
+            points: { show: false },
+            scale: 'ms',
           },
         ],
         axes: [
@@ -85,9 +94,20 @@
             size: 36,
           },
           {
-            stroke: '#8b949e88',
-            ticks: { stroke: '#8b949e22', width: 1 },
+            scale: 'req',
+            stroke: '#4dabf7aa',
+            ticks: { stroke: '#4dabf722', width: 1 },
             grid: { stroke: '#8b949e15', width: 1 },
+            font: '10px system-ui, sans-serif',
+            gap: 4,
+            size: 50,
+          },
+          {
+            scale: 'ms',
+            side: 1,
+            stroke: '#a78bfaaa',
+            ticks: { stroke: '#a78bfa22', width: 1 },
+            grid: { show: false },
             font: '10px system-ui, sans-serif',
             gap: 4,
             size: 50,
@@ -95,9 +115,9 @@
         ],
         cursor: { show: true, x: true, y: false },
         legend: { show: false },
-        scales: { x: { time: true } },
+        scales: { x: { time: true }, req: {}, ms: {} },
       },
-      [xs, ys],
+      [xs, ys, ms],
       chartEl,
     );
   }
@@ -446,7 +466,7 @@
         const w = Math.floor(entry.contentRect.width);
         if (w < 50) continue;
         if (uplot) {
-          uplot.setSize({ width: w, height: 140 });
+          uplot.setSize({ width: w, height: 180 });
         } else if (timeline?.points?.length) {
           scheduleBuildChart();
         }
@@ -565,7 +585,13 @@
 
         <!-- Traffic timeline chart -->
         <div class="timeline-chart-wrap table-section">
-          <h3 class="section-label">Traffic over time</h3>
+          <div class="chart-header">
+            <h3 class="section-label">Trafic HTTP</h3>
+            <div class="chart-legend">
+              <span class="legend-dot" style="background:#4dabf7"></span><span>Requests</span>
+              <span class="legend-dot" style="background:#a78bfa"></span><span>Timp mediu (ms)</span>
+            </div>
+          </div>
           {#if !timeline?.points?.length}
             <div class="muted">No timeline data available for this range.</div>
           {:else}
@@ -1051,7 +1077,12 @@
 
   /* Timeline chart */
   .timeline-chart-wrap { margin: 0 0 1rem; }
-  .timeline-chart { width: 100%; min-height: 140px; }
+  .timeline-chart { width: 100%; min-height: 180px; }
+  .chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem; flex-wrap: wrap; gap: 0.5rem; }
+  .chart-header h3 { margin: 0; }
+  .chart-legend { display: flex; align-items: center; gap: 0.75rem; font-size: 0.8rem; color: var(--text-muted); }
+  .chart-legend span:not(.legend-dot) { display: flex; align-items: center; gap: 0.3rem; }
+  .legend-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 
   /* Two-col layout */
   .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }

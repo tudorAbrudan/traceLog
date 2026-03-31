@@ -10,8 +10,9 @@ import (
 )
 
 type AccessTimelinePoint struct {
-	Ts    time.Time `json:"ts"`
-	Count int       `json:"count"`
+	Ts            time.Time `json:"ts"`
+	Count         int       `json:"count"`
+	AvgDurationMs float64   `json:"avg_duration_ms"`
 }
 
 type AccessTimeline struct {
@@ -485,7 +486,8 @@ func (s *Store) GetAccessTimeline(ctx context.Context, serverID, since, hubPathP
 	rows, err := s.db.QueryContext(ctx, `
         SELECT
             (CAST(strftime('%s', ts) AS INTEGER) / ?) * ? AS bucket_ts,
-            COUNT(*) AS cnt
+            COUNT(*) AS cnt,
+            COALESCE(AVG(CASE WHEN duration_ms > 0 THEN duration_ms END), 0) AS avg_ms
         FROM access_logs
         WHERE server_id = ? AND ts >= ?
           AND NOT INSTR(path, ?)
@@ -501,12 +503,14 @@ func (s *Store) GetAccessTimeline(ctx context.Context, serverID, since, hubPathP
 	for rows.Next() {
 		var bucketTs int64
 		var cnt int
-		if err := rows.Scan(&bucketTs, &cnt); err != nil {
+		var avgMs float64
+		if err := rows.Scan(&bucketTs, &cnt, &avgMs); err != nil {
 			return nil, err
 		}
 		points = append(points, AccessTimelinePoint{
-			Ts:    time.Unix(bucketTs, 0).UTC(),
-			Count: cnt,
+			Ts:            time.Unix(bucketTs, 0).UTC(),
+			Count:         cnt,
+			AvgDurationMs: avgMs,
 		})
 	}
 	if points == nil {
