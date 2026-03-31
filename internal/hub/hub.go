@@ -237,7 +237,7 @@ func (h *Hub) Start(ctx context.Context) error {
 		Addr:         addr,
 		Handler:      h.httpMetricsMiddleware(h.mux),
 		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		WriteTimeout: 120 * time.Second,
 		IdleTimeout:  120 * time.Second,
 		BaseContext:  func(_ net.Listener) context.Context { return ctx },
 	}

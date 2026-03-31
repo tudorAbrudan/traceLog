@@ -79,6 +79,7 @@ func (s *Store) migrate() error {
 		migration009,
 		migration010,
 		migration011,
+		migration012,
 	}
 
 	for i := currentVersion; i < len(migrations); i++ {
@@ -327,6 +328,12 @@ CREATE TABLE IF NOT EXISTS ip_threat_alerts (
     first_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_alerted DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+`
+
+const migration012 = `
+CREATE INDEX IF NOT EXISTS idx_access_logs_server_ts_ip ON access_logs(server_id, ts, ip);
+CREATE INDEX IF NOT EXISTS idx_access_logs_server_ts_path ON access_logs(server_id, ts, path);
+CREATE INDEX IF NOT EXISTS idx_access_logs_server_ts_status ON access_logs(server_id, ts, status_code);
 `
 
 func (s *Store) Backup(ctx context.Context, destPath string) error {

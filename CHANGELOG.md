@@ -4,6 +4,12 @@ All notable changes to TraceLog are documented here. The format is loosely based
 
 ## [Unreleased]
 
+## [v0.2.25] - 2026-03-31
+
+### Fixed
+
+- **HTTP Analytics — 502 timeout on busy servers:** access-stats ran 8 sequential full-table-scan queries that exceeded the 30s write timeout on large databases. Fix: (1) added composite indexes on `access_logs(server_id, ts, ip|path|status_code)` (migration 012), (2) increased HTTP write timeout from 30s to 120s.
+
 ## [v0.2.24] - 2026-03-31
 
 ### Fixed
