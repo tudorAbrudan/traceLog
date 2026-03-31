@@ -231,7 +231,7 @@ func (h *Hub) Run() error {
 }
 
 func (h *Hub) Start(ctx context.Context) error {
-	addr := fmt.Sprintf("%s:%d", h.cfg.BindAddress, h.cfg.Port)
+	addr := fmt.Sprintf("%s:%d", "0.0.0.0", h.cfg.Port)
 
 	h.server = &http.Server{
 		Addr:         addr,
