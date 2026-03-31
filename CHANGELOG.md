@@ -4,6 +4,12 @@ All notable changes to TraceLog are documented here. The format is loosely based
 
 ## [Unreleased]
 
+## [v0.2.23] - 2026-03-31
+
+### Fixed
+
+- **IP threat auto-alerts — prevent email spam:** auto-alert now requires BOTH `risk == "high"` AND `decision == "block"` (was only checking decision), which filters out medium/low-risk IPs and prevents alert spam. Also added fallback traffic-based reasons when ipinfo data is unavailable, ensuring alert messages always include a Reasons field.
+
 ## [v0.2.22] - 2026-03-31
 
 ### Changed
