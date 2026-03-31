@@ -165,9 +165,10 @@ export const api = {
   getProcessHistory: (id: string, range_: string = '1h') => request('GET', `/servers/${id}/processes?range=${range_}`),
 
   // Access Logs / HTTP Analytics
-  getAccessStats: (id: string, range_: string = '24h', topN?: number) => {
+  getAccessStats: (id: string, range_: string = '24h', topN?: number, section?: string) => {
     const q = new URLSearchParams({ range: range_ });
     if (topN != null && topN > 0) q.set('top_n', String(topN));
+    if (section) q.set('section', section);
     return request('GET', `/servers/${id}/access-stats?${q}`);
   },
   getRecentAccessLogs: (id: string) => request('GET', `/servers/${id}/access-logs`),

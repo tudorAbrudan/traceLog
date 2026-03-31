@@ -30,6 +30,11 @@
 
   let activeTab: 'overview' | 'paths' | 'clients' | 'requests' = 'overview';
 
+  let pathsLoaded = false;
+  let clientsLoaded = false;
+  let pathsLoading = false;
+  let clientsLoading = false;
+
   // Debounce range changes to avoid rapid API calls
   let rangeDebounceTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -261,6 +266,9 @@
     void loadTabData();
   }
 
+  $: if (activeTab === 'paths' && stats && !pathsLoaded) void loadPathsData();
+  $: if (activeTab === 'clients' && stats && !clientsLoaded) void loadClientsData();
+
   // --- Helpers ---
   function whoisHref(ip: string): string {
     return `https://ipwho.is/${encodeURIComponent(ip)}`;
@@ -366,29 +374,57 @@
 
   async function loadData() {
     if (!selectedServer) return;
+    loading = true;
     loadError = '';
+    pathsLoaded = false;
+    clientsLoaded = false;
     try {
-      // Load Overview tab data only (lazy load other tabs)
-      const [st, tl, recent, policy] = await Promise.all([
-        api.getAccessStats(selectedServer, range_, 20),
+      const [s, tl, logs, policy] = await Promise.all([
+        api.getAccessStats(selectedServer, range_, 20, 'overview'),
         api.getAccessTimeline(selectedServer, range_).catch(() => null),
         api.getRecentAccessLogs(selectedServer),
-        api.getAccessIPPolicy().catch(() => ({ ips: [] as string[] })),
+        api.getAccessIPPolicy().catch(() => ({ ips: [] })),
       ]);
-      stats = st;
-      timeline = tl as typeof timeline;
-      recentLogs = recent ?? [];
-      const ips = (policy && policy.ips) || [];
-      if (!blacklistDirty) {
-        blacklistText = ips.join('\n');
+      stats = s;
+      if (tl) timeline = tl as typeof timeline;
+      recentLogs = logs ?? [];
+      if (!blacklistDirty) blacklistText = (policy as any).ips?.join('\n') ?? '';
+    } catch (e: any) {
+      loadError = e?.message ?? 'Failed to load data';
+    } finally {
+      loading = false;
+    }
+    if (activeTab === 'requests') {
+      void refreshBadRequests();
+      void refreshSlowRequests();
+    }
+  }
+
+  async function loadPathsData() {
+    if (pathsLoaded || pathsLoading || !selectedServer) return;
+    pathsLoading = true;
+    try {
+      const s = await api.getAccessStats(selectedServer, range_, 20, 'paths');
+      if (s && stats) {
+        stats = { ...stats, top_paths: s.top_paths, top_method_paths: s.top_method_paths, top_paths_by_duration: s.top_paths_by_duration };
       }
-      // Only load bad/slow requests if on "Requests" tab (lazy loading)
-      if (activeTab === 'requests') {
-        await refreshBadRequests();
-        await refreshSlowRequests();
+      pathsLoaded = true;
+    } catch (_) { /* silent */ } finally {
+      pathsLoading = false;
+    }
+  }
+
+  async function loadClientsData() {
+    if (clientsLoaded || clientsLoading || !selectedServer) return;
+    clientsLoading = true;
+    try {
+      const s = await api.getAccessStats(selectedServer, range_, 20, 'clients');
+      if (s && stats) {
+        stats = { ...stats, top_ips: s.top_ips, bad_requests_by_ip: s.bad_requests_by_ip };
       }
-    } catch (e) {
-      loadError = (e as Error).message || 'Failed to load analytics';
+      clientsLoaded = true;
+    } catch (_) { /* silent */ } finally {
+      clientsLoading = false;
     }
   }
 
@@ -514,6 +550,11 @@
           <button type="button" class:active={range_ === r.value} on:click={() => selectRange(r.value)}>{r.label}</button>
         {/each}
       </div>
+      {#if loading}
+        <span class="range-loading">Se incarca...</span>
+      {:else if stats}
+        <span class="range-loaded">Date: {range_}</span>
+      {/if}
     </div>
   </div>
 
@@ -602,6 +643,9 @@
 
       <!-- Tab: Paths -->
       {#if activeTab === 'paths'}
+        {#if pathsLoading}
+          <div class="tab-loading">Incarca datele pentru {range_}...</div>
+        {/if}
         <div class="two-col">
           <div class="table-section">
             <h3>Top URL paths</h3>
@@ -658,6 +702,9 @@
 
       <!-- Tab: Clients -->
       {#if activeTab === 'clients'}
+        {#if clientsLoading}
+          <div class="tab-loading">Incarca datele pentru {range_}...</div>
+        {/if}
         {#if recommendedToBlock.length > 0}
           <div class="recommend-box">
             <div class="recommend-header">
@@ -1270,4 +1317,9 @@
   .error-msg { color: var(--danger); font-size: 0.82rem; margin: 0.5rem 0; padding: 0.4rem 0.75rem; background: rgba(248,81,73,0.08); border: 1px solid rgba(248,81,73,0.25); border-radius: 6px; }
   code { background: var(--bg-primary); padding: 1px 5px; border-radius: 4px; font-size: 0.85em; }
   .doc-ref { margin-left: 0.35rem; color: var(--accent); font-size: inherit; }
+
+  .range-loading { font-size: 0.75rem; color: var(--text-muted); animation: pulse 1s infinite; }
+  .range-loaded { font-size: 0.75rem; color: var(--text-muted); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+  .tab-loading { padding: 1rem; color: var(--text-muted); font-size: 0.9rem; }
 </style>

@@ -45,6 +45,7 @@ func (h *Hub) handleAccessLogStats(w http.ResponseWriter, r *http.Request) {
 	if rangeStr == "" {
 		rangeStr = "24h"
 	}
+	section := r.URL.Query().Get("section")
 	d, err := parseRange(rangeStr)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid range")
@@ -59,14 +60,14 @@ func (h *Hub) handleAccessLogStats(w http.ResponseWriter, r *http.Request) {
 	since := time.Now().Add(-d)
 	uaExclude := h.accessStatsExcludeUAPatterns(r.Context())
 	hubPathEx := h.accessStatsExcludeHubPathPrefix()
-	stats, err := h.store.GetAccessLogStats(r.Context(), id, since, topN, uaExclude, hubPathEx)
+	stats, err := h.store.GetAccessLogStats(r.Context(), id, since, topN, uaExclude, hubPathEx, section)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to get access stats")
 		return
 	}
 
 	rules := h.loadAccessIPBlacklist(r.Context())
-	if len(rules) > 0 {
+	if (section == "" || section == "overview") && len(rules) > 0 {
 		const capIPGroups = 15000
 		ipRows, err := h.store.GetAccessLogTopIPCounts(r.Context(), id, since, capIPGroups, uaExclude, hubPathEx)
 		if err != nil {

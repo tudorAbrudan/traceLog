@@ -124,9 +124,10 @@ type IPBadCount struct {
 // GetAccessLogStats aggregates HTTP access data. topN controls top paths, IPs, method+paths, and bad-by-IP rows (clamped 5–100).
 // excludeUASubstrings removes matching User-Agent rows from all aggregates (e.g. TraceLog’s own uptime probes).
 // excludeHubPathPrefix is the same normalized prefix as at install (not hardcoded): drop those paths from aggregates; empty skips.
+// section controls which query groups run: "overview" (or "") runs all, "paths" runs path queries only, "clients" runs IP queries only.
 //
 //nolint:gosec // G202: baseWhere is fixed SQL + accessUAExcludeSQL (INSTR…?) + accessLogExcludeHubUIPrefixSQL (? bound); UA/prefix bound as args.
-func (s *Store) GetAccessLogStats(ctx context.Context, serverID string, since time.Time, topN int, excludeUASubstrings []string, excludeHubPathPrefix string) (*AccessLogStats, error) {
+func (s *Store) GetAccessLogStats(ctx context.Context, serverID string, since time.Time, topN int, excludeUASubstrings []string, excludeHubPathPrefix string, section string) (*AccessLogStats, error) {
 	if topN < 5 {
 		topN = 5
 	}
@@ -146,127 +147,156 @@ func (s *Store) GetAccessLogStats(ctx context.Context, serverID string, since ti
 		return append(append(append([]any{}, baseArgs...), uaArgs...), pathArgs...)
 	}
 
-	err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*), COALESCE(AVG(duration_ms), 0),
-		 COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1.0 ELSE 0.0 END) / NULLIF(COUNT(*), 0) * 100, 0)
-		 FROM access_logs WHERE `+baseWhere,
-		rowArgs()...,
-	).Scan(&stats.TotalRequests, &stats.AvgDuration, &stats.ErrorRate)
-	if err != nil {
-		return nil, err
+	isOverview := section == "" || section == "overview"
+	isPaths := section == "" || section == "paths"
+	isClients := section == "" || section == "clients"
+
+	// Query 1: TotalRequests / AvgDuration / ErrorRate
+	if isOverview {
+		err := s.db.QueryRowContext(ctx,
+			`SELECT COUNT(*), COALESCE(AVG(duration_ms), 0),
+			 COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1.0 ELSE 0.0 END) / NULLIF(COUNT(*), 0) * 100, 0)
+			 FROM access_logs WHERE `+baseWhere,
+			rowArgs()...,
+		).Scan(&stats.TotalRequests, &stats.AvgDuration, &stats.ErrorRate)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	_ = s.db.QueryRowContext(ctx,
-		`SELECT COUNT(DISTINCT ip) FROM access_logs WHERE `+baseWhere+` AND ip != ''`,
-		rowArgs()...,
-	).Scan(&stats.UniqueIPCount)
+	// Query 2: UniqueIPCount
+	if isOverview {
+		_ = s.db.QueryRowContext(ctx,
+			`SELECT COUNT(DISTINCT ip) FROM access_logs WHERE `+baseWhere+` AND ip != ''`,
+			rowArgs()...,
+		).Scan(&stats.UniqueIPCount)
+	}
 
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT CAST(status_code / 100 AS TEXT) || 'xx', COUNT(*)
-		 FROM access_logs WHERE `+baseWhere+`
-		 GROUP BY CAST(status_code / 100 AS TEXT) ORDER BY 2 DESC`,
-		rowArgs()...,
-	)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var code string
-			var count int
-			if err := rows.Scan(&code, &count); err != nil {
-				return nil, err
+	// Query 3: StatusCodes
+	if isOverview {
+		rows, err := s.db.QueryContext(ctx,
+			`SELECT CAST(status_code / 100 AS TEXT) || 'xx', COUNT(*)
+			 FROM access_logs WHERE `+baseWhere+`
+			 GROUP BY CAST(status_code / 100 AS TEXT) ORDER BY 2 DESC`,
+			rowArgs()...,
+		)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var code string
+				var count int
+				if err := rows.Scan(&code, &count); err != nil {
+					return nil, err
+				}
+				stats.StatusCodes[code] = count
 			}
-			stats.StatusCodes[code] = count
 		}
 	}
 
 	qArgs := rowArgs()
-	rows, err = s.db.QueryContext(ctx,
-		`SELECT path, COUNT(*) as cnt FROM access_logs
-		 WHERE `+baseWhere+` GROUP BY path ORDER BY cnt DESC LIMIT ?`,
-		append(qArgs, topN)...,
-	)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var pc PathCount
-			if err := rows.Scan(&pc.Path, &pc.Count); err != nil {
-				return nil, err
+
+	// Query 4: TopPaths
+	if isPaths {
+		rows, err := s.db.QueryContext(ctx,
+			`SELECT path, COUNT(*) as cnt FROM access_logs
+			 WHERE `+baseWhere+` GROUP BY path ORDER BY cnt DESC LIMIT ?`,
+			append(qArgs, topN)...,
+		)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var pc PathCount
+				if err := rows.Scan(&pc.Path, &pc.Count); err != nil {
+					return nil, err
+				}
+				stats.TopPaths = append(stats.TopPaths, pc)
 			}
-			stats.TopPaths = append(stats.TopPaths, pc)
 		}
 	}
 
-	rows, err = s.db.QueryContext(ctx,
-		`SELECT ip, COUNT(*) as cnt, COALESCE(SUM(bytes_sent), 0) AS bytes_sent FROM access_logs
-		 WHERE `+baseWhere+` AND ip != '' GROUP BY ip ORDER BY cnt DESC LIMIT ?`,
-		append(qArgs, topN)...,
-	)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var ic IPCount
-			if err := rows.Scan(&ic.IP, &ic.Count, &ic.BytesSent); err != nil {
-				return nil, err
+	// Query 5: TopIPs
+	if isClients {
+		rows, err := s.db.QueryContext(ctx,
+			`SELECT ip, COUNT(*) as cnt, COALESCE(SUM(bytes_sent), 0) AS bytes_sent FROM access_logs
+			 WHERE `+baseWhere+` AND ip != '' GROUP BY ip ORDER BY cnt DESC LIMIT ?`,
+			append(qArgs, topN)...,
+		)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var ic IPCount
+				if err := rows.Scan(&ic.IP, &ic.Count, &ic.BytesSent); err != nil {
+					return nil, err
+				}
+				stats.TopIPs = append(stats.TopIPs, ic)
 			}
-			stats.TopIPs = append(stats.TopIPs, ic)
 		}
 	}
 
-	rows, err = s.db.QueryContext(ctx,
-		`SELECT method, path, COUNT(*) as cnt FROM access_logs
-		 WHERE `+baseWhere+` GROUP BY method, path ORDER BY cnt DESC LIMIT ?`,
-		append(qArgs, topN)...,
-	)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var mp MethodPathCount
-			if err := rows.Scan(&mp.Method, &mp.Path, &mp.Count); err != nil {
-				return nil, err
+	// Query 6: TopMethodPaths
+	if isPaths {
+		rows, err := s.db.QueryContext(ctx,
+			`SELECT method, path, COUNT(*) as cnt FROM access_logs
+			 WHERE `+baseWhere+` GROUP BY method, path ORDER BY cnt DESC LIMIT ?`,
+			append(qArgs, topN)...,
+		)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var mp MethodPathCount
+				if err := rows.Scan(&mp.Method, &mp.Path, &mp.Count); err != nil {
+					return nil, err
+				}
+				stats.TopMethodPaths = append(stats.TopMethodPaths, mp)
 			}
-			stats.TopMethodPaths = append(stats.TopMethodPaths, mp)
 		}
 	}
 
-	badN := topN
-	if badN > 50 {
-		badN = 50
-	}
-	rows, err = s.db.QueryContext(ctx,
-		`SELECT ip, COUNT(*) as cnt FROM access_logs
-		 WHERE `+baseWhere+` AND status_code >= 400 AND ip != ''
-		 GROUP BY ip ORDER BY cnt DESC LIMIT ?`,
-		append(qArgs, badN)...,
-	)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var ib IPBadCount
-			if err := rows.Scan(&ib.IP, &ib.BadCount); err != nil {
-				return nil, err
+	// Query 7: BadRequestsByIP
+	if isClients {
+		badN := topN
+		if badN > 50 {
+			badN = 50
+		}
+		rows, err := s.db.QueryContext(ctx,
+			`SELECT ip, COUNT(*) as cnt FROM access_logs
+			 WHERE `+baseWhere+` AND status_code >= 400 AND ip != ''
+			 GROUP BY ip ORDER BY cnt DESC LIMIT ?`,
+			append(qArgs, badN)...,
+		)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var ib IPBadCount
+				if err := rows.Scan(&ib.IP, &ib.BadCount); err != nil {
+					return nil, err
+				}
+				stats.BadRequestsByIP = append(stats.BadRequestsByIP, ib)
 			}
-			stats.BadRequestsByIP = append(stats.BadRequestsByIP, ib)
 		}
 	}
 
-	rows, err = s.db.QueryContext(ctx,
-		`SELECT path, AVG(duration_ms) AS avg_ms, COUNT(*) AS cnt
-		 FROM access_logs
-		 WHERE `+baseWhere+` AND path != '' AND duration_ms > 0
-		 GROUP BY path
-		 HAVING cnt >= 3
-		 ORDER BY avg_ms DESC
-		 LIMIT ?`,
-		append(qArgs, topN)...,
-	)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var pd PathDurationStat
-			if err := rows.Scan(&pd.Path, &pd.AvgMs, &pd.Count); err != nil {
-				return nil, err
+	// Query 8: TopPathsByDuration
+	if isPaths {
+		rows, err := s.db.QueryContext(ctx,
+			`SELECT path, AVG(duration_ms) AS avg_ms, COUNT(*) AS cnt
+			 FROM access_logs
+			 WHERE `+baseWhere+` AND path != '' AND duration_ms > 0
+			 GROUP BY path
+			 HAVING cnt >= 3
+			 ORDER BY avg_ms DESC
+			 LIMIT ?`,
+			append(qArgs, topN)...,
+		)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var pd PathDurationStat
+				if err := rows.Scan(&pd.Path, &pd.AvgMs, &pd.Count); err != nil {
+					return nil, err
+				}
+				stats.TopPathsByDuration = append(stats.TopPathsByDuration, pd)
 			}
-			stats.TopPathsByDuration = append(stats.TopPathsByDuration, pd)
 		}
 	}
 
