@@ -2,6 +2,7 @@ package hub
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -63,24 +64,33 @@ func (h *Hub) handleThreatIPInfo(w http.ResponseWriter, r *http.Request) {
 		assessment.IPInfo = ipinfo // Include ipinfo data in response for frontend
 		assessments = append(assessments, assessment)
 
-		// Auto-alert if NEW IP with BLOCK decision and channel configured
-		if autoAlertChannelID != "" && assessment.Decision == "block" {
+		// Auto-alert if NEW IP with HIGH risk (not just block decision) and channel configured
+		// Only alert for high-risk IPs to avoid spam
+		if autoAlertChannelID != "" && assessment.Risk == "high" && assessment.Decision == "block" {
 			wasAlerted, err := h.store.HasIPThreatBeenAlerted(r.Context(), ip)
 			if err != nil {
-				slog.Debug("check ip threat alert", "ip", ip, "error", err)
+				slog.Warn("check ip threat alert", "ip", ip, "error", err)
 			} else if !wasAlerted {
-				// New IP with BLOCK decision: send alert
+				// New high-risk IP with BLOCK decision: send alert
+				reasons := strings.Join(assessment.Reasons, "; ")
+				if reasons == "" {
+					reasons = "High threat score from traffic analysis"
+				}
 				alert := &alerts.Alert{
 					RuleID:  "ip_threat_" + strings.ReplaceAll(ip, ".", "_"),
 					Metric:  "IP_THREAT_NEW",
-					Message: "New IP threat detected: " + ip + " (" + assessment.Risk + " risk). Reasons: " + strings.Join(assessment.Reasons, "; "),
+					Message: "⚠️ HIGH RISK IP DETECTED: " + ip + " (" + assessment.Risk + " risk, score " + fmt.Sprintf("%d", assessment.Score) + "). Reasons: " + reasons,
 				}
 				if err := h.notifyAlert(r.Context(), autoAlertChannelID, alert); err != nil {
-					slog.Debug("send ip threat alert", "ip", ip, "channel", autoAlertChannelID, "error", err)
+					slog.Warn("send ip threat alert", "ip", ip, "channel", autoAlertChannelID, "error", err)
+				} else {
+					slog.Info("sent ip threat alert", "ip", ip)
 				}
 				// Mark as alerted
 				if err := h.store.RecordIPThreatAlert(r.Context(), ip); err != nil {
-					slog.Debug("record ip threat alert", "ip", ip, "error", err)
+					slog.Warn("record ip threat alert", "ip", ip, "error", err)
+				} else {
+					slog.Info("recorded ip threat alert", "ip", ip)
 				}
 			}
 		}

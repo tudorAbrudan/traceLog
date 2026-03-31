@@ -154,6 +154,12 @@ func AssessIPThreat(ipinfo *IPInfoData, trafficScore int) *IPThreatAssessment {
 	if ipinfo == nil {
 		assess.Risk = "unknown"
 		assess.Decision = "monitor"
+		// Add traffic score reasons even without ipinfo
+		if trafficScore >= 6 {
+			assess.Reasons = append(assess.Reasons, "High error rate or suspicious traffic pattern")
+		} else if trafficScore >= 3 {
+			assess.Reasons = append(assess.Reasons, "Moderate traffic anomaly detected")
+		}
 		return assess
 	}
 
