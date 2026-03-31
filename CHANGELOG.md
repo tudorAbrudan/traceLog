@@ -4,6 +4,12 @@ All notable changes to TraceLog are documented here. The format is loosely based
 
 ## [Unreleased]
 
+## [v0.2.24] - 2026-03-31
+
+### Fixed
+
+- **Hub bind address:** force listening on 0.0.0.0 instead of localhost, fixing 502 Bad Gateway errors from nginx reverse proxy. Hub is now accessible from other machines.
+
 ## [v0.2.23] - 2026-03-31
 
 ### Fixed
