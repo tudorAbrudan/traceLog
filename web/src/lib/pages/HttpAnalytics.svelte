@@ -30,6 +30,9 @@
 
   let activeTab: 'overview' | 'paths' | 'clients' | 'requests' = 'overview';
 
+  // Debounce range changes to avoid rapid API calls
+  let rangeDebounceTimer: ReturnType<typeof setTimeout> | undefined;
+
   const ranges = [
     { value: '1h', label: '1H' },
     { value: '6h', label: '6H' },
@@ -347,7 +350,7 @@
     try {
       // Load Overview tab data only (lazy load other tabs)
       const [st, tl, recent, policy] = await Promise.all([
-        api.getAccessStats(selectedServer, range_, 50),
+        api.getAccessStats(selectedServer, range_, 20),
         api.getAccessTimeline(selectedServer, range_).catch(() => null),
         api.getRecentAccessLogs(selectedServer),
         api.getAccessIPPolicy().catch(() => ({ ips: [] as string[] })),
@@ -397,7 +400,12 @@
 
   function selectRange(r: string) {
     range_ = r;
-    void loadData();
+    // Debounce range changes (wait 300ms for rapid clicks before loading)
+    if (rangeDebounceTimer) clearTimeout(rangeDebounceTimer);
+    rangeDebounceTimer = setTimeout(() => {
+      void loadData();
+      rangeDebounceTimer = undefined;
+    }, 300);
   }
 
   function showBadForIP(ip: string) {

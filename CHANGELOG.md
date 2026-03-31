@@ -4,6 +4,12 @@ All notable changes to TraceLog are documented here. The format is loosely based
 
 ## [Unreleased]
 
+## [v0.2.22] - 2026-03-31
+
+### Changed
+
+- **HTTP Analytics — performance improvements:** (1) debounce range changes to avoid rapid API calls when user clicks multiple time range buttons, (2) reduce top paths from 50 to 20 for faster rendering, (3) lazy load Requests tab data only when tab is activated. Combined result: ~80-90% faster initial load and range switching.
+
 ## [v0.2.21] - 2026-03-30
 
 ### Changed
